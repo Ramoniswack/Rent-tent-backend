@@ -1,0 +1,361 @@
+# NomadNotes Backend API
+
+Node.js/Express backend for the NomadNotes travel itinerary planner.
+
+## ✅ Status
+- **Server**: Running on http://localhost:5000
+- **MongoDB**: Connected successfully
+- **Health Check**: http://localhost:5000/api/health
+
+## Setup
+
+1. Install dependencies:
+```bash
+cd backend
+npm install
+```
+
+2. Create `.env` file:
+```bash
+cp .env.example .env
+```
+
+3. Configure environment variables in `.env`:
+```
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/nomadnotes
+JWT_SECRET=your_jwt_secret_key_here
+OPENWEATHER_API_KEY=your_openweathermap_api_key_here
+CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
+CLOUDINARY_API_KEY=your_cloudinary_api_key
+CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+```
+
+4. Start the server:
+```bash
+npm run dev  # Development with nodemon
+npm start    # Production
+```
+
+---
+
+## API Endpoints
+
+### 🔓 Public Endpoints (No Authentication Required)
+
+#### Authentication
+- **POST** `/api/auth/register` - Register new user
+  - Body: `{ name, email, password }`
+  - Returns: `{ token, user: { id, name, email } }`
+
+- **POST** `/api/auth/login` - Login user
+  - Body: `{ email, password }`
+  - Returns: `{ token, user: { id, name, email } }`
+
+---
+
+### 🔒 Protected Endpoints (Authentication Required)
+
+> **Note**: All protected endpoints require `Authorization: Bearer <token>` header
+
+---
+
+### 👤 User Profile
+
+- **GET** `/api/user/profile` - Get current user profile
+  - Returns: `{ id, name, email, username, profilePicture }`
+
+- **PATCH** `/api/user/profile` - Update user profile
+  - Body: `{ name?, username?, profilePicture? }`
+  - Returns: Updated user object
+
+---
+
+### 🗺️ Trips
+
+#### Trip Management
+
+- **GET** `/api/trips` - Get all trips for authenticated user
+  - Returns: Array of trips (owned + collaborated)
+  - Includes: Owner and collaborator details
+
+- **GET** `/api/trips/public` - Get all public trips (excluding user's own)
+  - Returns: Array of public trips created by other users
+
+- **GET** `/api/trips/:id` - Get single trip by ID
+  - Returns: Trip details with access information
+  - Access: Owner, accepted collaborators, or public trips
+
+- **POST** `/api/trips` - Create new trip
+  - Body: `{ title, startDate, endDate, destination?, country?, currency?, imageUrl?, isPublic? }`
+  - Returns: Created trip object
+
+- **PATCH** `/api/trips/:id` - Update trip details
+  - Body: `{ title?, startDate?, endDate?, status?, destination?, lat?, lng? }`
+  - Access: Owner only
+  - Returns: Updated trip object
+
+- **DELETE** `/api/trips/:id` - Delete trip (cascade delete)
+  - Access: Owner only
+  - Deletes: Trip + all destinations + all expenses
+  - Returns: Success message
+
+- **POST** `/api/trips/:id/share` - Toggle public/private status
+  - Access: Owner only
+  - Returns: `{ isPublic, shareableUrl?, message }`
+
+#### Collaboration
+
+- **POST** `/api/trips/:id/invite` - Invite user to trip
+  - Body: `{ username, role: 'viewer' | 'editor' }`
+  - Access: Owner only
+  - Returns: Updated trip with collaborators
+
+- **POST** `/api/trips/:id/request-join` - Request to join public trip
+  - Access: Any authenticated user (not owner/collaborator)
+  - Returns: Success message
+
+- **POST** `/api/trips/:id/accept-request/:userId` - Accept join request
+  - Access: Owner only
+  - Returns: Updated trip with accepted collaborator
+
+- **POST** `/api/trips/:id/reject-request/:userId` - Reject join request
+  - Access: Owner only
+  - Returns: Success message
+
+- **DELETE** `/api/trips/:id/collaborators/:userId` - Remove collaborator
+  - Access: Owner (to remove others) or self (to leave trip)
+  - Returns: Success message
+
+- **GET** `/api/trips/search/users` - Search users by username
+  - Query: `?username=<search_term>`
+  - Returns: Array of matching users (max 10)
+
+#### Activity Log
+
+- **GET** `/api/trips/:id/activities` - Get trip activity log
+  - Access: Owner or collaborators
+  - Returns: Array of activity records (last 50)
+
+---
+
+### 📍 Destinations (Itinerary Stops)
+
+- **GET** `/api/trips/:id/destinations` - Get all destinations for trip
+  - Access: Owner or collaborators
+  - Returns: Array of destinations with status
+
+- **POST** `/api/trips/:id/destinations` - Add destination to trip
+  - Body: `{ name, activity, time, status? }`
+  - Access: Owner or editor collaborators
+  - Returns: Created destination object
+
+- **PATCH** `/api/destinations/:id` - Update destination
+  - Body: `{ name?, activity?, time?, status? }`
+  - Status: `'planning' | 'traveling' | 'completed'`
+  - Access: Owner or editor collaborators
+  - Returns: Updated destination object
+
+- **DELETE** `/api/destinations/:id` - Delete destination
+  - Access: Owner or editor collaborators
+  - Returns: Success message
+
+---
+
+### 💰 Expenses
+
+- **GET** `/api/trips/:id/expenses` - Get all expenses for trip
+  - Access: Owner or collaborators
+  - Returns: Array of expense records
+
+- **POST** `/api/trips/:id/expenses` - Add expense to trip
+  - Body: `{ item, amount, category, date? }`
+  - Categories: `'accommodation' | 'food' | 'transport' | 'activities' | 'shopping' | 'other'`
+  - Access: Owner or editor collaborators
+  - Returns: Created expense object
+
+- **GET** `/api/trips/:id/expenses/summary` - Get expense summary
+  - Access: Owner or collaborators
+  - Returns: `{ total, byCategory: { category: amount } }`
+
+---
+
+### 🌤️ Weather
+
+- **GET** `/api/weather/:city` - Get weather forecast for city
+  - Access: Authenticated users
+  - Returns: `{ city, temperature, condition, forecast: [...] }`
+  - Note: Requires OpenWeatherMap API key
+
+---
+
+### 📤 Upload
+
+- **POST** `/api/upload` - Upload image to Cloudinary
+  - Content-Type: `multipart/form-data`
+  - Field: `image` (file)
+  - Max size: 5MB
+  - Allowed: Image files only
+  - Returns: `{ url: 'cloudinary_url' }`
+
+---
+
+## Data Models
+
+### Trip
+```javascript
+{
+  _id: ObjectId,
+  title: String,
+  startDate: Date,
+  endDate: Date,
+  userId: ObjectId (ref: User),
+  collaborators: [{
+    userId: ObjectId (ref: User),
+    role: 'viewer' | 'editor',
+    status: 'pending' | 'accepted',
+    invitedAt: Date
+  }],
+  isPublic: Boolean,
+  status: 'planning' | 'traveling' | 'completed',
+  destination: String,
+  country: String,
+  currency: String,
+  imageUrl: String,
+  lat: Number,
+  lng: Number,
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+### Destination
+```javascript
+{
+  _id: ObjectId,
+  tripId: ObjectId (ref: Trip),
+  name: String,
+  activity: String,
+  time: Date,
+  status: 'planning' | 'traveling' | 'completed',
+  createdBy: ObjectId (ref: User),
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+### Expense
+```javascript
+{
+  _id: ObjectId,
+  tripId: ObjectId (ref: Trip),
+  item: String,
+  amount: Number,
+  category: String,
+  date: Date,
+  createdBy: ObjectId (ref: User),
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+### User
+```javascript
+{
+  _id: ObjectId,
+  name: String,
+  email: String (unique),
+  username: String (unique),
+  password: String (hashed),
+  profilePicture: String,
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+### Activity
+```javascript
+{
+  _id: ObjectId,
+  tripId: ObjectId (ref: Trip),
+  userId: ObjectId (ref: User),
+  action: String,
+  details: String,
+  metadata: Object,
+  createdAt: Date
+}
+```
+
+---
+
+## Error Responses
+
+All endpoints return errors in the following format:
+```javascript
+{
+  error: "Error message description"
+}
+```
+
+### Common HTTP Status Codes
+- `200` - Success
+- `201` - Created
+- `400` - Bad Request (validation error)
+- `401` - Unauthorized (missing/invalid token)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not Found
+- `500` - Internal Server Error
+
+---
+
+## Authentication
+
+The API uses JWT (JSON Web Tokens) for authentication.
+
+### Getting a Token
+1. Register: `POST /api/auth/register`
+2. Login: `POST /api/auth/login`
+
+Both endpoints return a token in the response.
+
+### Using the Token
+Include the token in the Authorization header for all protected endpoints:
+```
+Authorization: Bearer <your_token_here>
+```
+
+---
+
+## Development
+
+### Running Tests
+```bash
+npm test
+```
+
+### Database Reset
+```bash
+# Drop all collections
+mongo nomadnotes --eval "db.dropDatabase()"
+```
+
+### Logs
+The server logs all requests and errors to the console in development mode.
+
+---
+
+## Technologies
+
+- **Runtime**: Node.js
+- **Framework**: Express.js
+- **Database**: MongoDB with Mongoose ODM
+- **Authentication**: JWT (jsonwebtoken)
+- **File Upload**: Multer + Cloudinary
+- **Weather API**: OpenWeatherMap
+- **Security**: bcryptjs, cors, helmet
+
+---
+
+## License
+
+MIT
