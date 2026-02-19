@@ -1,0 +1,267 @@
+const User = require('../models/User');
+const Trip = require('../models/Trip');
+const GearRental = require('../models/GearRental');
+const bcrypt = require('bcryptjs');
+
+// GET /api/admin/stats - Get dashboard statistics
+exports.getStats = async (req, res) => {
+  try {
+    const [totalUsers, totalTrips, totalGear, activeGear] = await Promise.all([
+      User.countDocuments(),
+      Trip.countDocuments(),
+      GearRental.countDocuments(),
+      GearRental.countDocuments({ available: true })
+    ]);
+
+    res.json({
+      totalUsers,
+      totalTrips,
+      totalGear,
+      activeGear
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET /api/admin/users - Get all users with pagination
+exports.getUsers = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const skip = (page - 1) * limit;
+
+    const query = search
+      ? {
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } },
+            { username: { $regex: search, $options: 'i' } }
+          ]
+        }
+      : {};
+
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .select('-password')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      User.countDocuments(query)
+    ]);
+
+    res.json({
+      users,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// DELETE /api/admin/users/:id - Delete a user
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Prevent deleting yourself
+    if (id === req.userId) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Delete user's trips and gear
+    await Promise.all([
+      Trip.deleteMany({ userId: id }),
+      GearRental.deleteMany({ owner: id })
+    ]);
+
+    await User.findByIdAndDelete(id);
+
+    res.json({ message: 'User and associated data deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// PATCH /api/admin/users/:id - Update user (including admin status)
+exports.updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, username, isAdmin, password } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Update fields
+    if (name) user.name = name;
+    if (email) user.email = email;
+    if (username !== undefined) user.username = username;
+    if (isAdmin !== undefined) user.isAdmin = isAdmin;
+    
+    // Update password if provided
+    if (password && password.length >= 6) {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+
+    const updatedUser = await User.findById(id).select('-password');
+    res.json(updatedUser);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET /api/admin/trips - Get all trips with pagination
+exports.getTrips = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const skip = (page - 1) * limit;
+
+    const query = search
+      ? {
+          $or: [
+            { title: { $regex: search, $options: 'i' } },
+            { destination: { $regex: search, $options: 'i' } }
+          ]
+        }
+      : {};
+
+    const [trips, total] = await Promise.all([
+      Trip.find(query)
+        .populate('userId', 'name email username')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Trip.countDocuments(query)
+    ]);
+
+    res.json({
+      trips,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// DELETE /api/admin/trips/:id - Delete a trip
+exports.deleteTrip = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const trip = await Trip.findById(id);
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found' });
+    }
+
+    await Trip.findByIdAndDelete(id);
+
+    res.json({ message: 'Trip deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET /api/admin/gear - Get all gear rentals with pagination
+exports.getGear = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const search = req.query.search || '';
+    const skip = (page - 1) * limit;
+
+    const query = search
+      ? {
+          $or: [
+            { title: { $regex: search, $options: 'i' } },
+            { category: { $regex: search, $options: 'i' } },
+            { location: { $regex: search, $options: 'i' } }
+          ]
+        }
+      : {};
+
+    const [gear, total] = await Promise.all([
+      GearRental.find(query)
+        .populate('owner', 'name email username')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      GearRental.countDocuments(query)
+    ]);
+
+    res.json({
+      gear,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// DELETE /api/admin/gear/:id - Delete a gear rental
+exports.deleteGear = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const gear = await GearRental.findById(id);
+    if (!gear) {
+      return res.status(404).json({ error: 'Gear not found' });
+    }
+
+    await GearRental.findByIdAndDelete(id);
+
+    res.json({ message: 'Gear rental deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// PATCH /api/admin/gear/:id - Update gear rental
+exports.updateGear = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { available } = req.body;
+
+    const gear = await GearRental.findById(id);
+    if (!gear) {
+      return res.status(404).json({ error: 'Gear not found' });
+    }
+
+    if (available !== undefined) {
+      gear.available = available;
+    }
+
+    await gear.save();
+
+    const updatedGear = await GearRental.findById(id).populate('owner', 'name email username');
+    res.json(updatedGear);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
