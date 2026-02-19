@@ -46,6 +46,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/destinations', destinationRoutes);
 app.use('/api/trips', expenseRoutes);
+app.use('/api/expenses', expenseRoutes); // For direct expense operations (delete, update)
 app.use('/api/weather', weatherRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/user', userRoutes);

@@ -316,6 +316,55 @@ router.post('/:id/expenses', expenseController.createExpense);
 
 /**
  * @swagger
+ * /expenses/{id}:
+ *   delete:
+ *     summary: Delete an expense
+ *     tags: [Expenses]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Expense deleted successfully
+ */
+router.delete('/expenses/:id', expenseController.deleteExpense);
+
+/**
+ * @swagger
+ * /expenses/{id}:
+ *   put:
+ *     summary: Update an expense
+ *     tags: [Expenses]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               item:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *               category:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Expense updated successfully
+ */
+router.put('/expenses/:id', expenseController.updateExpense);
+
+/**
+ * @swagger
  * /trips/{id}/invite:
  *   post:
  *     summary: Invite user to collaborate on trip

@@ -128,3 +128,59 @@ exports.getExpenseSummary = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// DELETE /api/expenses/:id - Delete an expense
+exports.deleteExpense = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the expense first
+    const expense = await Expense.findById(id);
+    if (!expense) {
+      return res.status(404).json({ error: 'Expense not found' });
+    }
+
+    // Verify edit permission (owner or editor)
+    const trip = await canEdit(expense.tripId, req.userId);
+    if (!trip) {
+      return res.status(403).json({ error: 'Unauthorized to delete this expense' });
+    }
+
+    await Expense.findByIdAndDelete(id);
+    res.json({ message: 'Expense deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// PUT /api/expenses/:id - Update an expense
+exports.updateExpense = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { item, amount, category } = req.body;
+
+    // Find the expense first
+    const expense = await Expense.findById(id);
+    if (!expense) {
+      return res.status(404).json({ error: 'Expense not found' });
+    }
+
+    // Verify edit permission (owner or editor)
+    const trip = await canEdit(expense.tripId, req.userId);
+    if (!trip) {
+      return res.status(403).json({ error: 'Unauthorized to update this expense' });
+    }
+
+    // Update the expense
+    expense.item = item || expense.item;
+    expense.amount = amount !== undefined ? amount : expense.amount;
+    expense.category = category || expense.category;
+    
+    await expense.save();
+    await expense.populate('createdBy', 'name email');
+    
+    res.json(expense);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
