@@ -179,3 +179,29 @@ exports.getLikes = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// GET /api/matches/interacted - Get all user IDs that current user has interacted with (liked or passed)
+exports.getInteractedUsers = async (req, res) => {
+  try {
+    const currentUserId = req.userId;
+
+    const matches = await Match.find({
+      $or: [
+        { user1: currentUserId },
+        { user2: currentUserId }
+      ]
+    });
+
+    // Extract user IDs that current user has interacted with
+    const interactedUserIds = matches.map(match => {
+      return match.user1.toString() === currentUserId 
+        ? match.user2.toString() 
+        : match.user1.toString();
+    });
+
+    res.json({ interactedUserIds });
+  } catch (error) {
+    console.error('Get interacted users error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
