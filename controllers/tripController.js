@@ -168,7 +168,7 @@ exports.getTrip = async (req, res) => {
 // POST /api/trips - Create a new trip
 exports.createTrip = async (req, res) => {
   try {
-    const { title, startDate, endDate, destination, country, currency, imageUrl, isPublic } = req.body;
+    const { title, startDate, endDate, destination, country, currency, imageUrl, isPublic, lat, lng } = req.body;
 
     // Validate dates
     if (new Date(endDate) < new Date(startDate)) {
@@ -184,7 +184,9 @@ exports.createTrip = async (req, res) => {
       currency: currency || 'NPR',
       imageUrl: imageUrl,
       isPublic: isPublic || false,
-      userId: req.userId
+      userId: req.userId,
+      lat: lat,
+      lng: lng
     });
 
     await trip.save();
@@ -195,7 +197,7 @@ exports.createTrip = async (req, res) => {
       req.userId,
       'created_trip',
       `Created trip "${title}"`,
-      { title, startDate, endDate, destination, country, currency, isPublic }
+      { title, startDate, endDate, destination, country, currency, isPublic, lat, lng }
     );
     
     res.status(201).json(trip);
