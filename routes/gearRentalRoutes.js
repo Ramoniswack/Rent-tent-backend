@@ -5,6 +5,7 @@ const authMiddleware = require('../middleware/auth');
 
 // Public routes
 router.get('/', gearRentalController.getAllGear);
+router.get('/user/:username', gearRentalController.getGearByUser);
 router.get('/:id', gearRentalController.getGearById);
 router.get('/:id/reviews', gearRentalController.getGearReviews);
 router.get('/:id/unavailable-dates', gearRentalController.getUnavailableDates);
