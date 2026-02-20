@@ -46,12 +46,10 @@ const userSchema = new mongoose.Schema({
   geoLocation: {
     type: {
       type: String,
-      enum: ['Point'],
-      default: 'Point'
+      enum: ['Point']
     },
     coordinates: {
-      type: [Number], // [longitude, latitude]
-      index: '2dsphere'
+      type: [Number] // [longitude, latitude]
     }
   },
   age: {

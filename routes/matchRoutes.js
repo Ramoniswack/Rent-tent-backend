@@ -8,6 +8,7 @@ router.use(auth);
 
 // Discovery and Swiping (New Core Engine)
 router.get('/discover', matchController.discover);
+router.post('/discover/advanced', matchController.advancedDiscover);
 router.post('/swipe', matchController.swipe);
 
 // Like/Pass actions (Legacy - kept for backward compatibility)

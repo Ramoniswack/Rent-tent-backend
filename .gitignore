@@ -6,5 +6,9 @@ node_modules/
 uploads/
 scripts/
 
+/doc
+
+
 # Firebase service account (contains sensitive keys)
 config/firebase-service-account.json
+doc/

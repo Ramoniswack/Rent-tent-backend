@@ -156,6 +156,243 @@ exports.discover = async (req, res) => {
   }
 };
 
+// Advanced Discovery with Match Scoring
+exports.advancedDiscover = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Validate user ID
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    // Extract and validate parameters
+    const {
+      longitude,
+      latitude,
+      maxDistance = 500, // km
+      preferredStyles = [],
+      preferredInterests = [],
+      preferredGender = 'Any',
+      ageRange = { min: 18, max: 60 }
+    } = req.body;
+
+    // Validate coordinates
+    if (typeof longitude !== 'number' || typeof latitude !== 'number') {
+      return res.status(400).json({ error: 'Invalid coordinates. Longitude and latitude must be numbers.' });
+    }
+
+    if (longitude < -180 || longitude > 180 || latitude < -90 || latitude > 90) {
+      return res.status(400).json({ error: 'Coordinates out of valid range.' });
+    }
+
+    // Validate maxDistance
+    if (maxDistance < 1 || maxDistance > 500) {
+      return res.status(400).json({ error: 'maxDistance must be between 1 and 500 km.' });
+    }
+
+    // Validate age range
+    if (!ageRange.min || !ageRange.max || ageRange.min < 18 || ageRange.max > 100 || ageRange.min > ageRange.max) {
+      return res.status(400).json({ error: 'Invalid age range. Min must be >= 18, max <= 100, and min <= max.' });
+    }
+
+    // Validate gender
+    const validGenders = ['Male', 'Female', 'Non-binary', 'Any'];
+    if (!validGenders.includes(preferredGender)) {
+      return res.status(400).json({ error: 'Invalid gender preference. Must be Male, Female, Non-binary, or Any.' });
+    }
+
+    // Convert km to meters for MongoDB
+    const maxDistanceMeters = maxDistance * 1000;
+
+    // Get all users current user has already interacted with
+    const existingMatches = await Match.find({
+      $or: [
+        { user1: userId, user1Status: { $in: ['like', 'pass'] } },
+        { user2: userId, user2Status: { $in: ['like', 'pass'] } }
+      ]
+    }).lean();
+
+    // Extract user IDs to exclude
+    const excludedUserIds = existingMatches.map(match => {
+      if (match.user1.toString() === userId) {
+        return match.user2.toString();
+      }
+      return match.user1.toString();
+    });
+    
+    // Add current user to excluded list
+    excludedUserIds.push(userId);
+
+    // Build hard filters
+    const hardFilters = {
+      _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
+      'preferences.publicProfile': true
+    };
+
+    // Age filter (convert to number for comparison)
+    hardFilters.$expr = {
+      $and: [
+        { $gte: [{ $toInt: '$age' }, ageRange.min] },
+        { $lte: [{ $toInt: '$age' }, ageRange.max] }
+      ]
+    };
+
+    // Gender filter (if not 'Any')
+    if (preferredGender !== 'Any') {
+      hardFilters.gender = preferredGender;
+    }
+
+    // Advanced Aggregation Pipeline
+    const advancedPipeline = [
+      // Step 1: $geoNear - Geospatial filtering
+      {
+        $geoNear: {
+          near: {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          },
+          distanceField: 'distance',
+          maxDistance: maxDistanceMeters,
+          spherical: true,
+          key: 'geoLocation',
+          query: {
+            _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
+            'preferences.publicProfile': true
+          }
+        }
+      },
+      
+      // Step 2: $match - Hard filters (age and gender)
+      {
+        $match: hardFilters
+      },
+      
+      // Step 3: $addFields - Calculate match scores
+      {
+        $addFields: {
+          // Style Score: Count matching travel styles
+          styleScore: {
+            $size: {
+              $ifNull: [
+                {
+                  $setIntersection: [
+                    { $ifNull: [{ $cond: [{ $isArray: '$travelStyle' }, '$travelStyle', ['$travelStyle']] }, []] },
+                    preferredStyles
+                  ]
+                },
+                []
+              ]
+            }
+          },
+          
+          // Interest Score: Count matching interests
+          interestScore: {
+            $size: {
+              $ifNull: [
+                {
+                  $setIntersection: [
+                    { $ifNull: ['$interests', []] },
+                    preferredInterests
+                  ]
+                },
+                []
+              ]
+            }
+          }
+        }
+      },
+      
+      // Step 4: $addFields - Calculate total score
+      {
+        $addFields: {
+          totalScore: {
+            $add: ['$styleScore', '$interestScore']
+          }
+        }
+      },
+      
+      // Step 5: $sort - Sort by score (desc) then distance (asc)
+      {
+        $sort: {
+          totalScore: -1,
+          distance: 1
+        }
+      },
+      
+      // Step 6: Limit results to 20
+      {
+        $limit: 20
+      },
+      
+      // Step 7: Project final fields
+      {
+        $project: {
+          name: 1,
+          username: 1,
+          profilePicture: 1,
+          bio: 1,
+          age: 1,
+          gender: 1,
+          location: 1,
+          interests: 1,
+          travelStyle: 1,
+          languages: 1,
+          upcomingTrips: 1,
+          distance: 1,
+          styleScore: 1,
+          interestScore: 1,
+          totalScore: 1
+        }
+      }
+    ];
+
+    const potentialMatches = await User.aggregate(advancedPipeline);
+
+    // Format response for mobile frontend
+    const formattedMatches = potentialMatches.map(user => ({
+      id: user._id.toString(),
+      name: user.name,
+      username: user.username,
+      profilePicture: user.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
+      bio: user.bio || '',
+      age: user.age || 'N/A',
+      gender: user.gender || 'N/A',
+      location: user.location || 'Unknown',
+      distance: Math.round(user.distance / 1000), // Convert to km
+      interests: user.interests || [],
+      travelStyle: user.travelStyle || '',
+      languages: user.languages || [],
+      upcomingTrips: user.upcomingTrips || [],
+      matchScore: {
+        total: user.totalScore || 0,
+        styleScore: user.styleScore || 0,
+        interestScore: user.interestScore || 0
+      }
+    }));
+
+    res.json({
+      success: true,
+      count: formattedMatches.length,
+      profiles: formattedMatches,
+      filters: {
+        maxDistance,
+        preferredStyles,
+        preferredInterests,
+        preferredGender,
+        ageRange
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in advancedDiscover:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch potential matches',
+      message: error.message 
+    });
+  }
+};
+
 // Swipe action (like or pass)
 exports.swipe = async (req, res) => {
   try {
