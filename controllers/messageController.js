@@ -1,6 +1,7 @@
 const Message = require('../models/Message');
 const Match = require('../models/Match');
 const User = require('../models/User');
+const notificationService = require('../services/notificationService');
 
 // Get all matches for the current user
 exports.getMatches = async (req, res) => {
@@ -159,6 +160,28 @@ exports.sendMessage = async (req, res) => {
     const populatedMessage = await Message.findById(message._id)
       .populate('sender', 'name profilePicture')
       .populate('receiver', 'name profilePicture');
+
+    // Send notification to receiver
+    try {
+      const sender = await User.findById(userId);
+      const receiver = await User.findById(receiverId);
+      
+      if (receiver && receiver.notificationPreferences?.messages !== false) {
+        await notificationService.sendToUser(receiverId, {
+          title: `New message from ${sender.name}`,
+          body: text.substring(0, 100),
+          icon: sender.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(sender.name)}&background=random`,
+          data: {
+            type: 'message',
+            senderId: userId,
+            url: '/messages'
+          }
+        });
+      }
+    } catch (notifError) {
+      console.error('Error sending notification:', notifError);
+      // Don't fail the message send if notification fails
+    }
 
     res.status(201).json({
       id: populatedMessage._id,

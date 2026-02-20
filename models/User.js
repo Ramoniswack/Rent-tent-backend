@@ -94,6 +94,22 @@ const userSchema = new mongoose.Schema({
   isAdmin: {
     type: Boolean,
     default: false
+  },
+  fcmTokens: [{
+    type: String
+  }],
+  webPushSubscriptions: [{
+    endpoint: String,
+    keys: {
+      p256dh: String,
+      auth: String
+    }
+  }],
+  notificationPreferences: {
+    messages: { type: Boolean, default: true },
+    bookings: { type: Boolean, default: true },
+    matches: { type: Boolean, default: true },
+    tripUpdates: { type: Boolean, default: true }
   }
 }, {
   timestamps: true
