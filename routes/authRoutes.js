@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const googleAuthController = require('../controllers/googleAuthController');
 
 /**
  * @swagger
@@ -105,6 +106,44 @@ router.post('/register', authController.register);
  *               $ref: '#/components/schemas/Error'
  */
 router.post('/login', authController.login);
+
+/**
+ * @swagger
+ * /auth/google:
+ *   post:
+ *     summary: Login/Register with Google OAuth
+ *     tags: [Authentication]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 description: Google ID token
+ *     responses:
+ *       200:
+ *         description: Authentication successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Invalid token
+ *       500:
+ *         description: Authentication failed
+ */
+router.post('/google', googleAuthController.googleAuth);
 
 module.exports = router;
 
