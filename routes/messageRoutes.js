@@ -9,6 +9,12 @@ router.use(authMiddleware);
 // Get all matches
 router.get('/matches', messageController.getMatches);
 
+// Get unread count (must be before /:otherUserId)
+router.get('/unread/count', messageController.getUnreadCount);
+
+// Get blocked users (must be before /:otherUserId)
+router.get('/blocked', messageController.getBlockedUsers);
+
 // Get messages with a specific user
 router.get('/:otherUserId', messageController.getMessages);
 
@@ -20,9 +26,6 @@ router.post('/matches', messageController.createMatch);
 
 // Mark message as read
 router.put('/:messageId/read', messageController.markAsRead);
-
-// Get unread count
-router.get('/unread/count', messageController.getUnreadCount);
 
 // Delete single message
 router.delete('/message/:messageId', messageController.deleteMessage);
@@ -45,7 +48,7 @@ router.post('/nickname/:otherUserId', messageController.setNickname);
 router.post('/mute/:otherUserId', messageController.muteConversation);
 router.post('/unmute/:otherUserId', messageController.unmuteConversation);
 
-// Get blocked users
-router.get('/blocked', messageController.getBlockedUsers);
+// Unmatch user
+router.delete('/unmatch/:otherUserId', messageController.unmatchUser);
 
 module.exports = router;

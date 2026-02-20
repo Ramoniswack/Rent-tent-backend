@@ -595,3 +595,34 @@ exports.getBlockedUsers = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch blocked users' });
   }
 };
+
+// Unmatch user
+exports.unmatchUser = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Delete all messages between these users
+    await Message.deleteMany({
+      $or: [
+        { sender: userId, receiver: otherUserId },
+        { sender: otherUserId, receiver: userId }
+      ]
+    });
+
+    // Delete the match
+    await Match.findByIdAndDelete(match._id);
+
+    res.json({ success: true, message: 'Unmatched successfully' });
+  } catch (error) {
+    console.error('Error unmatching user:', error);
+    res.status(500).json({ error: 'Failed to unmatch user' });
+  }
+};
