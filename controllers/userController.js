@@ -86,3 +86,66 @@ exports.getAllUsers = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// GET /api/user/stats - Get user statistics
+exports.getUserStats = async (req, res) => {
+  try {
+    const Trip = require('../models/Trip');
+    const GearRental = require('../models/GearRental');
+    
+    // Get total trips count
+    const totalTrips = await Trip.countDocuments({ user: req.userId });
+    
+    // Get total expenses from all trips
+    const tripsWithExpenses = await Trip.find({ user: req.userId }).select('expenses');
+    const totalExpenses = tripsWithExpenses.reduce((sum, trip) => {
+      if (trip.expenses && Array.isArray(trip.expenses)) {
+        return sum + trip.expenses.reduce((tripSum, expense) => tripSum + (expense.amount || 0), 0);
+      }
+      return sum;
+    }, 0);
+    
+    // Get gear rental stats (both as renter and owner)
+    const rentedGear = await GearRental.countDocuments({ 
+      renter: req.userId,
+      status: { $in: ['pending', 'approved', 'active'] }
+    });
+    
+    const ownedGear = await GearRental.countDocuments({ 
+      owner: req.userId 
+    });
+    
+    // Calculate trips this year
+    const currentYear = new Date().getFullYear();
+    const startOfYear = new Date(currentYear, 0, 1);
+    const tripsThisYear = await Trip.countDocuments({ 
+      user: req.userId,
+      startDate: { $gte: startOfYear }
+    });
+    
+    // Calculate percentage increase
+    const lastYear = currentYear - 1;
+    const startOfLastYear = new Date(lastYear, 0, 1);
+    const endOfLastYear = new Date(lastYear, 11, 31);
+    const tripsLastYear = await Trip.countDocuments({ 
+      user: req.userId,
+      startDate: { $gte: startOfLastYear, $lte: endOfLastYear }
+    });
+    
+    const percentageIncrease = tripsLastYear > 0 
+      ? Math.round(((tripsThisYear - tripsLastYear) / tripsLastYear) * 100)
+      : tripsThisYear > 0 ? 100 : 0;
+    
+    res.json({
+      totalTrips,
+      totalExpenses: Math.round(totalExpenses * 100) / 100, // Round to 2 decimal places
+      gearRented: rentedGear,
+      gearOwned: ownedGear,
+      tripsThisYear,
+      percentageIncrease
+    });
+  } catch (error) {
+    console.error('Error fetching user stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
