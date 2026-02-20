@@ -6,7 +6,11 @@ const auth = require('../middleware/auth');
 // All routes require authentication
 router.use(auth);
 
-// Like/Pass actions
+// Discovery and Swiping (New Core Engine)
+router.get('/discover', matchController.discover);
+router.post('/swipe', matchController.swipe);
+
+// Like/Pass actions (Legacy - kept for backward compatibility)
 router.post('/like', matchController.likeUser);
 router.post('/pass', matchController.passUser);
 

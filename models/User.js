@@ -42,6 +42,18 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // Geospatial location for discovery (GeoJSON format)
+  geoLocation: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      index: '2dsphere'
+    }
+  },
   age: {
     type: String,
     trim: true
@@ -119,6 +131,9 @@ const userSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Create 2dsphere index for geospatial queries
+userSchema.index({ 'geoLocation': '2dsphere' });
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
