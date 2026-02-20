@@ -119,7 +119,7 @@ io.on('connection', (socket) => {
 
   // Send message
   socket.on('message:send', async (data) => {
-    const { receiverId, senderId, text, image } = data;
+    const { receiverId, senderId, text, image, replyToId } = data;
     
     // Save message to database
     const Message = require('./models/Message');
@@ -144,11 +144,18 @@ io.on('connection', (socket) => {
         messageData.type = 'image';
       }
       
+      // Add replyTo if provided
+      if (replyToId) {
+        messageData.replyTo = replyToId;
+      }
+      
       const message = await Message.create(messageData);
 
       const populatedMessage = await Message.findById(message._id)
         .populate('sender', 'name profilePicture')
-        .populate('receiver', 'name profilePicture');
+        .populate('receiver', 'name profilePicture')
+        .populate('replyTo', 'text sender image')
+        .populate('reactions.user', 'name profilePicture');
 
       // Send to receiver if online
       const receiverSocketId = onlineUsers.get(receiverId);
