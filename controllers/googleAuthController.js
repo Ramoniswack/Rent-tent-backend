@@ -1,26 +1,19 @@
-const { OAuth2Client } = require('google-auth-library');
+const admin = require('firebase-admin');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-
-// Verify Google token and login/register user
+// Verify Firebase ID token and login/register user
 exports.googleAuth = async (req, res) => {
   try {
     const { token } = req.body;
 
     if (!token) {
-      return res.status(400).json({ error: 'Google token is required' });
+      return res.status(400).json({ error: 'Firebase token is required' });
     }
 
-    // Verify the Google token
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-
-    const payload = ticket.getPayload();
-    const { email, name, picture, sub: googleId } = payload;
+    // Verify the Firebase ID token using Firebase Admin SDK
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    const { email, name, picture, uid: googleId } = decodedToken;
 
     if (!email) {
       return res.status(400).json({ error: 'Email not provided by Google' });
