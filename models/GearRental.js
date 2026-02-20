@@ -94,7 +94,17 @@ const gearRentalSchema = new mongoose.Schema({
   totalRentals: {
     type: Number,
     default: 0
-  }
+  },
+  unavailableDates: [{
+    startDate: {
+      type: Date,
+      required: true
+    },
+    endDate: {
+      type: Date,
+      required: true
+    }
+  }]
 }, {
   timestamps: true
 });

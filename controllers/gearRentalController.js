@@ -249,6 +249,22 @@ exports.createBooking = async (req, res) => {
       });
     }
 
+    // Check for manually blocked dates
+    if (gear.unavailableDates && gear.unavailableDates.length > 0) {
+      const hasBlockedDate = gear.unavailableDates.some(range => {
+        const rangeStart = new Date(range.startDate);
+        const rangeEnd = new Date(range.endDate);
+        // Check if booking dates overlap with blocked dates
+        return (start <= rangeEnd && end >= rangeStart);
+      });
+
+      if (hasBlockedDate) {
+        return res.status(400).json({ 
+          error: 'Gear is not available for these dates' 
+        });
+      }
+    }
+
     const booking = await RentalBooking.create({
       gear: gearId,
       renter: userId,
@@ -411,5 +427,90 @@ exports.getGearReviews = async (req, res) => {
   } catch (error) {
     console.error('Error fetching reviews:', error);
     res.status(500).json({ error: 'Failed to fetch reviews' });
+  }
+};
+
+// Get unavailable dates for a gear item
+exports.getUnavailableDates = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find all confirmed and active bookings for this gear
+    const bookings = await RentalBooking.find({
+      gear: id,
+      status: { $in: ['confirmed', 'active'] }
+    }).select('startDate endDate');
+
+    // Get manually blocked dates from gear
+    const gear = await GearRental.findById(id).select('unavailableDates');
+    
+    const unavailableDates = bookings.map(booking => ({
+      startDate: booking.startDate,
+      endDate: booking.endDate,
+      type: 'booked'
+    }));
+
+    // Add manually blocked dates if they exist
+    if (gear && gear.unavailableDates) {
+      gear.unavailableDates.forEach(range => {
+        unavailableDates.push({
+          startDate: range.startDate,
+          endDate: range.endDate,
+          type: 'blocked'
+        });
+      });
+    }
+
+    res.json(unavailableDates);
+  } catch (error) {
+    console.error('Error fetching unavailable dates:', error);
+    res.status(500).json({ error: 'Failed to fetch unavailable dates' });
+  }
+};
+
+// Manage availability calendar (block/unblock dates)
+exports.manageAvailability = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { id } = req.params;
+    const { startDate, endDate, action } = req.body; // action: 'block' or 'unblock'
+
+    if (!startDate || !endDate || !action) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const gear = await GearRental.findById(id);
+
+    if (!gear) {
+      return res.status(404).json({ error: 'Gear not found' });
+    }
+
+    if (gear.owner.toString() !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (action === 'block') {
+      // Add date range to unavailable dates
+      gear.unavailableDates = gear.unavailableDates || [];
+      gear.unavailableDates.push({ startDate: start, endDate: end });
+    } else if (action === 'unblock') {
+      // Remove date range from unavailable dates
+      gear.unavailableDates = (gear.unavailableDates || []).filter(range => {
+        const rangeStart = new Date(range.startDate);
+        const rangeEnd = new Date(range.endDate);
+        // Remove if dates match
+        return !(rangeStart.getTime() === start.getTime() && rangeEnd.getTime() === end.getTime());
+      });
+    }
+
+    await gear.save();
+
+    res.json({ message: `Dates ${action}ed successfully`, unavailableDates: gear.unavailableDates });
+  } catch (error) {
+    console.error('Error managing availability:', error);
+    res.status(500).json({ error: 'Failed to manage availability' });
   }
 };
