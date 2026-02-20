@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const User = require('../models/User');
+const notificationController = require('../controllers/notificationController');
+
+// Notification CRUD operations
+router.get('/', auth, notificationController.getNotifications);
+router.get('/unread/count', auth, notificationController.getUnreadCount);
+router.put('/:notificationId/read', auth, notificationController.markAsRead);
+router.put('/read-all', auth, notificationController.markAllAsRead);
+router.delete('/:notificationId', auth, notificationController.deleteNotification);
+router.delete('/read/all', auth, notificationController.deleteAllRead);
+router.post('/create', auth, notificationController.createNotification);
 
 // Register FCM token (mobile)
 router.post('/register-mobile', auth, async (req, res) => {

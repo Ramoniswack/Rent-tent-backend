@@ -80,14 +80,19 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Socket.IO setup for real-time messaging
+// Socket.IO setup for real-time messaging and notifications
 const { Server } = require('socket.io');
+const notificationHelper = require('./services/notificationHelper');
+
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     methods: ['GET', 'POST']
   }
 });
+
+// Initialize notification helper with io instance
+notificationHelper.setIO(io);
 
 // Store online users
 const onlineUsers = new Map();
@@ -99,10 +104,17 @@ io.on('connection', (socket) => {
   socket.on('user:join', (userId) => {
     onlineUsers.set(userId, socket.id);
     socket.userId = userId;
+    socket.join(`user:${userId}`); // Join user-specific room for notifications
     console.log(`User ${userId} joined`);
     
     // Broadcast online status
     io.emit('user:online', userId);
+    
+    // Send unread notification count
+    const Notification = require('./models/Notification');
+    Notification.getUnreadCount(userId).then(count => {
+      socket.emit('notification:count', count);
+    });
   });
 
   // Send message
@@ -111,6 +123,9 @@ io.on('connection', (socket) => {
     
     // Save message to database
     const Message = require('./models/Message');
+    const Notification = require('./models/Notification');
+    const User = require('./models/User');
+    
     try {
       const messageData = {
         sender: senderId,
@@ -143,6 +158,21 @@ io.on('connection', (socket) => {
 
       // Send confirmation to sender
       socket.emit('message:sent', populatedMessage);
+      
+      // Create notification for receiver
+      const sender = await User.findById(senderId);
+      const messagePreview = text ? (text.length > 50 ? text.substring(0, 50) + '...' : text) : '📷 Image';
+      
+      await Notification.createAndEmit({
+        recipient: receiverId,
+        sender: senderId,
+        type: 'message',
+        title: `New message from ${sender.name}`,
+        message: messagePreview,
+        link: `/messages`,
+        data: { messageId: message._id }
+      }, io);
+      
     } catch (error) {
       console.error('Error saving message:', error);
       socket.emit('message:error', { error: 'Failed to send message' });
