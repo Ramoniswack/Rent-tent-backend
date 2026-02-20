@@ -573,7 +573,8 @@ exports.getBlockedUsers = async (req, res) => {
         const isUser1 = match.user1._id.toString() === userId;
         const userSettings = isUser1 ? match.user1Settings : match.user2Settings;
         
-        if (userSettings.isBlocked) {
+        // Check if settings exist and user is blocked
+        if (userSettings && userSettings.isBlocked) {
           const otherUser = isUser1 ? match.user2 : match.user1;
           return {
             id: otherUser._id,
