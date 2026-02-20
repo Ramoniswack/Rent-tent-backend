@@ -165,9 +165,13 @@ exports.createMatch = async (req, res) => {
     const userId = req.userId;
     const { otherUserId } = req.body;
 
+    // Sort user IDs to ensure consistent ordering
+    const [user1, user2] = [userId, otherUserId].sort();
+
     // Check if match already exists
     const existingMatch = await Match.findOne({
-      users: { $all: [userId, otherUserId] }
+      user1,
+      user2
     });
 
     if (existingMatch) {
@@ -182,12 +186,17 @@ exports.createMatch = async (req, res) => {
 
     // Create match
     const match = await Match.create({
-      users: [userId, otherUserId],
-      status: 'matched'
+      user1,
+      user2,
+      user1Liked: true,
+      user2Liked: true,
+      matched: true,
+      matchedAt: new Date()
     });
 
     const populatedMatch = await Match.findById(match._id)
-      .populate('users', 'name email profilePicture username');
+      .populate('user1', 'name email profilePicture username')
+      .populate('user2', 'name email profilePicture username');
 
     res.status(201).json(populatedMatch);
   } catch (error) {
