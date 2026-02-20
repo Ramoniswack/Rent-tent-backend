@@ -118,7 +118,9 @@ exports.getMessages = async (req, res) => {
     })
     .sort({ createdAt: 1 })
     .populate('sender', 'name profilePicture')
-    .populate('receiver', 'name profilePicture');
+    .populate('receiver', 'name profilePicture')
+    .populate('replyTo', 'text sender image')
+    .populate('reactions.user', 'name profilePicture');
 
     // Mark messages as read
     await Message.updateMany(
@@ -132,7 +134,22 @@ exports.getMessages = async (req, res) => {
       text: msg.text,
       image: msg.image,
       timestamp: msg.createdAt,
-      read: msg.read
+      read: msg.read,
+      replyTo: msg.replyTo ? {
+        id: msg.replyTo._id,
+        text: msg.replyTo.text,
+        image: msg.replyTo.image,
+        senderId: msg.replyTo.sender
+      } : null,
+      reactions: msg.reactions.map(r => ({
+        user: {
+          id: r.user._id,
+          name: r.user.name,
+          profilePicture: r.user.profilePicture
+        },
+        emoji: r.emoji,
+        createdAt: r.createdAt
+      }))
     }));
 
     res.json(formattedMessages);
@@ -146,7 +163,7 @@ exports.getMessages = async (req, res) => {
 exports.sendMessage = async (req, res) => {
   try {
     const userId = req.userId;
-    const { receiverId, text } = req.body;
+    const { receiverId, text, replyToId } = req.body;
 
     if (!text || !text.trim()) {
       return res.status(400).json({ error: 'Message text is required' });
@@ -164,16 +181,27 @@ exports.sendMessage = async (req, res) => {
       return res.status(403).json({ error: 'You can only message users you have matched with' });
     }
 
+    // Verify replyTo message exists if provided
+    if (replyToId) {
+      const replyToMessage = await Message.findById(replyToId);
+      if (!replyToMessage) {
+        return res.status(404).json({ error: 'Reply-to message not found' });
+      }
+    }
+
     // Create message
     const message = await Message.create({
       sender: userId,
       receiver: receiverId,
-      text: text.trim()
+      text: text.trim(),
+      replyTo: replyToId || null
     });
 
     const populatedMessage = await Message.findById(message._id)
       .populate('sender', 'name profilePicture')
-      .populate('receiver', 'name profilePicture');
+      .populate('receiver', 'name profilePicture')
+      .populate('replyTo', 'text sender image')
+      .populate('reactions.user', 'name profilePicture');
 
     // Send notification to receiver
     try {
@@ -202,7 +230,14 @@ exports.sendMessage = async (req, res) => {
       senderId: populatedMessage.sender._id,
       text: populatedMessage.text,
       timestamp: populatedMessage.createdAt,
-      read: populatedMessage.read
+      read: populatedMessage.read,
+      replyTo: populatedMessage.replyTo ? {
+        id: populatedMessage.replyTo._id,
+        text: populatedMessage.replyTo.text,
+        image: populatedMessage.replyTo.image,
+        senderId: populatedMessage.replyTo.sender
+      } : null,
+      reactions: []
     });
   } catch (error) {
     console.error('Error sending message:', error);
@@ -624,5 +659,114 @@ exports.unmatchUser = async (req, res) => {
   } catch (error) {
     console.error('Error unmatching user:', error);
     res.status(500).json({ error: 'Failed to unmatch user' });
+  }
+};
+
+// Add reaction to message
+exports.addReaction = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+
+    if (!emoji) {
+      return res.status(400).json({ error: 'Emoji is required' });
+    }
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Check if user already reacted with this emoji
+    const existingReaction = message.reactions.find(
+      r => r.user.toString() === userId && r.emoji === emoji
+    );
+
+    if (existingReaction) {
+      return res.status(400).json({ error: 'You already reacted with this emoji' });
+    }
+
+    // Add reaction
+    message.reactions.push({
+      user: userId,
+      emoji,
+      createdAt: new Date()
+    });
+
+    await message.save();
+
+    const populatedMessage = await Message.findById(message._id)
+      .populate('reactions.user', 'name profilePicture');
+
+    res.json({
+      success: true,
+      reactions: populatedMessage.reactions
+    });
+  } catch (error) {
+    console.error('Error adding reaction:', error);
+    res.status(500).json({ error: 'Failed to add reaction' });
+  }
+};
+
+// Remove reaction from message
+exports.removeReaction = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { messageId } = req.params;
+    const { emoji } = req.body;
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Remove reaction
+    message.reactions = message.reactions.filter(
+      r => !(r.user.toString() === userId && r.emoji === emoji)
+    );
+
+    await message.save();
+
+    const populatedMessage = await Message.findById(message._id)
+      .populate('reactions.user', 'name profilePicture');
+
+    res.json({
+      success: true,
+      reactions: populatedMessage.reactions
+    });
+  } catch (error) {
+    console.error('Error removing reaction:', error);
+    res.status(500).json({ error: 'Failed to remove reaction' });
+  }
+};
+
+// Clear message notifications when user opens conversation
+exports.clearMessageNotifications = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const Notification = require('../models/Notification');
+
+    // Clear all message notifications from this user
+    await Notification.updateMany(
+      {
+        user: userId,
+        'data.type': 'message',
+        'data.senderId': otherUserId,
+        read: false
+      },
+      {
+        read: true
+      }
+    );
+
+    res.json({ success: true, message: 'Notifications cleared' });
+  } catch (error) {
+    console.error('Error clearing notifications:', error);
+    res.status(500).json({ error: 'Failed to clear notifications' });
   }
 };

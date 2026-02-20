@@ -51,4 +51,11 @@ router.post('/unmute/:otherUserId', messageController.unmuteConversation);
 // Unmatch user
 router.delete('/unmatch/:otherUserId', messageController.unmatchUser);
 
+// Add/Remove reaction to message
+router.post('/reaction/:messageId', messageController.addReaction);
+router.delete('/reaction/:messageId', messageController.removeReaction);
+
+// Clear message notifications
+router.post('/notifications/clear/:otherUserId', messageController.clearMessageNotifications);
+
 module.exports = router;
