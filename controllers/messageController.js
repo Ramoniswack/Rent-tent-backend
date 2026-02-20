@@ -34,6 +34,10 @@ exports.getMatches = async (req, res) => {
             return null;
           }
           
+          // Get user-specific settings
+          const isUser1 = match.user1._id.toString() === userId;
+          const userSettings = isUser1 ? match.user1Settings : match.user2Settings;
+          
           // Get last message between these users
           const lastMessage = await Message.findOne({
             $or: [
@@ -51,13 +55,17 @@ exports.getMatches = async (req, res) => {
 
           return {
             id: otherUser._id,
-            name: otherUser.name,
+            name: userSettings.nickname || otherUser.name,
             username: otherUser.username,
+            profilePicture: otherUser.profilePicture,
             imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
             lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation',
             timestamp: lastMessage ? lastMessage.createdAt : match.matchedAt,
             unread: unreadCount,
-            online: false
+            online: false,
+            isPinned: userSettings.isPinned,
+            isMuted: userSettings.isMuted,
+            isBlocked: userSettings.isBlocked
           };
         } catch (err) {
           console.error('Error processing match:', err);
@@ -66,9 +74,15 @@ exports.getMatches = async (req, res) => {
       })
     );
 
-    // Filter out null values and sort by most recent message
+    // Filter out null values and sort by pinned first, then most recent message
     const validMatches = matchesWithDetails.filter(m => m !== null);
-    validMatches.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    validMatches.sort((a, b) => {
+      // Pinned conversations first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      // Then by most recent message
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
 
     res.json(validMatches);
   } catch (error) {
@@ -283,5 +297,256 @@ exports.getUnreadCount = async (req, res) => {
   } catch (error) {
     console.error('Error fetching unread count:', error);
     res.status(500).json({ error: 'Failed to fetch unread count' });
+  }
+};
+
+// Delete single message
+exports.deleteMessage = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { messageId } = req.params;
+
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    // Only sender can delete their message
+    if (message.sender.toString() !== userId) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    await Message.findByIdAndDelete(messageId);
+
+    res.json({ success: true, message: 'Message deleted' });
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message' });
+  }
+};
+
+// Delete entire conversation
+exports.deleteConversation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    // Delete all messages between these users
+    await Message.deleteMany({
+      $or: [
+        { sender: userId, receiver: otherUserId },
+        { sender: otherUserId, receiver: userId }
+      ]
+    });
+
+    res.json({ success: true, message: 'Conversation deleted' });
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    res.status(500).json({ error: 'Failed to delete conversation' });
+  }
+};
+
+// Block user
+exports.blockUser = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isBlocked = true;
+    } else {
+      match.user2Settings.isBlocked = true;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'User blocked' });
+  } catch (error) {
+    console.error('Error blocking user:', error);
+    res.status(500).json({ error: 'Failed to block user' });
+  }
+};
+
+// Unblock user
+exports.unblockUser = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isBlocked = false;
+    } else {
+      match.user2Settings.isBlocked = false;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'User unblocked' });
+  } catch (error) {
+    console.error('Error unblocking user:', error);
+    res.status(500).json({ error: 'Failed to unblock user' });
+  }
+};
+
+// Pin conversation
+exports.pinConversation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isPinned = true;
+    } else {
+      match.user2Settings.isPinned = true;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'Conversation pinned' });
+  } catch (error) {
+    console.error('Error pinning conversation:', error);
+    res.status(500).json({ error: 'Failed to pin conversation' });
+  }
+};
+
+// Unpin conversation
+exports.unpinConversation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isPinned = false;
+    } else {
+      match.user2Settings.isPinned = false;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'Conversation unpinned' });
+  } catch (error) {
+    console.error('Error unpinning conversation:', error);
+    res.status(500).json({ error: 'Failed to unpin conversation' });
+  }
+};
+
+// Set nickname
+exports.setNickname = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+    const { nickname } = req.body;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.nickname = nickname || '';
+    } else {
+      match.user2Settings.nickname = nickname || '';
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'Nickname updated', nickname });
+  } catch (error) {
+    console.error('Error setting nickname:', error);
+    res.status(500).json({ error: 'Failed to set nickname' });
+  }
+};
+
+// Mute conversation
+exports.muteConversation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isMuted = true;
+    } else {
+      match.user2Settings.isMuted = true;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'Conversation muted' });
+  } catch (error) {
+    console.error('Error muting conversation:', error);
+    res.status(500).json({ error: 'Failed to mute conversation' });
+  }
+};
+
+// Unmute conversation
+exports.unmuteConversation = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { otherUserId } = req.params;
+
+    const [user1, user2] = [userId, otherUserId].sort();
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    // Update the appropriate user settings
+    if (match.user1.toString() === userId) {
+      match.user1Settings.isMuted = false;
+    } else {
+      match.user2Settings.isMuted = false;
+    }
+
+    await match.save();
+
+    res.json({ success: true, message: 'Conversation unmuted' });
+  } catch (error) {
+    console.error('Error unmuting conversation:', error);
+    res.status(500).json({ error: 'Failed to unmute conversation' });
   }
 };

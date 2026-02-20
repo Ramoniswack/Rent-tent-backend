@@ -25,6 +25,19 @@ const matchSchema = new mongoose.Schema({
   },
   matchedAt: {
     type: Date
+  },
+  // User-specific settings
+  user1Settings: {
+    isPinned: { type: Boolean, default: false },
+    nickname: { type: String, default: '' },
+    isBlocked: { type: Boolean, default: false },
+    isMuted: { type: Boolean, default: false }
+  },
+  user2Settings: {
+    isPinned: { type: Boolean, default: false },
+    nickname: { type: String, default: '' },
+    isBlocked: { type: Boolean, default: false },
+    isMuted: { type: Boolean, default: false }
   }
 }, {
   timestamps: true
