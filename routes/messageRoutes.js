@@ -45,4 +45,7 @@ router.post('/nickname/:otherUserId', messageController.setNickname);
 router.post('/mute/:otherUserId', messageController.muteConversation);
 router.post('/unmute/:otherUserId', messageController.unmuteConversation);
 
+// Get blocked users
+router.get('/blocked', messageController.getBlockedUsers);
+
 module.exports = router;

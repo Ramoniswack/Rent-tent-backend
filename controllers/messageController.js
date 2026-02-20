@@ -550,3 +550,47 @@ exports.unmuteConversation = async (req, res) => {
     res.status(500).json({ error: 'Failed to unmute conversation' });
   }
 };
+
+// Get blocked users
+exports.getBlockedUsers = async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    // Find all matches where current user has blocked someone
+    const matches = await Match.find({
+      $or: [
+        { user1: userId },
+        { user2: userId }
+      ]
+    })
+    .populate('user1', 'name email profilePicture username')
+    .populate('user2', 'name email profilePicture username')
+    .lean();
+
+    // Filter matches where user has blocked the other person
+    const blockedUsers = matches
+      .map(match => {
+        const isUser1 = match.user1._id.toString() === userId;
+        const userSettings = isUser1 ? match.user1Settings : match.user2Settings;
+        
+        if (userSettings.isBlocked) {
+          const otherUser = isUser1 ? match.user2 : match.user1;
+          return {
+            id: otherUser._id,
+            name: otherUser.name,
+            username: otherUser.username,
+            profilePicture: otherUser.profilePicture,
+            imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
+            blockedAt: match.updatedAt
+          };
+        }
+        return null;
+      })
+      .filter(user => user !== null);
+
+    res.json(blockedUsers);
+  } catch (error) {
+    console.error('Error fetching blocked users:', error);
+    res.status(500).json({ error: 'Failed to fetch blocked users' });
+  }
+};
