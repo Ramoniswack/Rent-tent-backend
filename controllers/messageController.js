@@ -36,7 +36,7 @@ exports.getMatches = async (req, res) => {
           
           // Get user-specific settings
           const isUser1 = match.user1._id.toString() === userId;
-          const userSettings = isUser1 ? match.user1Settings : match.user2Settings;
+          const userSettings = isUser1 ? (match.user1Settings || {}) : (match.user2Settings || {});
           
           // Get last message between these users
           const lastMessage = await Message.findOne({
@@ -63,9 +63,9 @@ exports.getMatches = async (req, res) => {
             timestamp: lastMessage ? lastMessage.createdAt : match.matchedAt,
             unread: unreadCount,
             online: false,
-            isPinned: userSettings.isPinned,
-            isMuted: userSettings.isMuted,
-            isBlocked: userSettings.isBlocked
+            isPinned: userSettings.isPinned || false,
+            isMuted: userSettings.isMuted || false,
+            isBlocked: userSettings.isBlocked || false
           };
         } catch (err) {
           console.error('Error processing match:', err);
