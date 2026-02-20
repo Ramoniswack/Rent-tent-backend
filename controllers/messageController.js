@@ -16,49 +16,63 @@ exports.getMatches = async (req, res) => {
       matched: true
     })
     .populate('user1', 'name email profilePicture username')
-    .populate('user2', 'name email profilePicture username');
+    .populate('user2', 'name email profilePicture username')
+    .lean();
+
+    console.log(`Found ${matches.length} matches for user ${userId}`);
 
     // For each match, get the other user and last message
     const matchesWithDetails = await Promise.all(
       matches.map(async (match) => {
-        // Get the other user
-        const otherUser = match.user1._id.toString() === userId ? match.user2 : match.user1;
-        
-        // Get last message between these users
-        const lastMessage = await Message.findOne({
-          $or: [
-            { sender: userId, receiver: otherUser._id },
-            { sender: otherUser._id, receiver: userId }
-          ]
-        }).sort({ createdAt: -1 });
+        try {
+          // Get the other user
+          const otherUser = match.user1._id.toString() === userId ? match.user2 : match.user1;
+          
+          if (!otherUser) {
+            console.error('Other user not found in match:', match);
+            return null;
+          }
+          
+          // Get last message between these users
+          const lastMessage = await Message.findOne({
+            $or: [
+              { sender: userId, receiver: otherUser._id },
+              { sender: otherUser._id, receiver: userId }
+            ]
+          }).sort({ createdAt: -1 }).lean();
 
-        // Count unread messages from other user
-        const unreadCount = await Message.countDocuments({
-          sender: otherUser._id,
-          receiver: userId,
-          read: false
-        });
+          // Count unread messages from other user
+          const unreadCount = await Message.countDocuments({
+            sender: otherUser._id,
+            receiver: userId,
+            read: false
+          });
 
-        return {
-          id: otherUser._id,
-          name: otherUser.name,
-          username: otherUser.username,
-          imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
-          lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation',
-          timestamp: lastMessage ? lastMessage.createdAt : match.matchedAt,
-          unread: unreadCount,
-          online: false
-        };
+          return {
+            id: otherUser._id,
+            name: otherUser.name,
+            username: otherUser.username,
+            imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
+            lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation',
+            timestamp: lastMessage ? lastMessage.createdAt : match.matchedAt,
+            unread: unreadCount,
+            online: false
+          };
+        } catch (err) {
+          console.error('Error processing match:', err);
+          return null;
+        }
       })
     );
 
-    // Sort by most recent message
-    matchesWithDetails.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    // Filter out null values and sort by most recent message
+    const validMatches = matchesWithDetails.filter(m => m !== null);
+    validMatches.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    res.json(matchesWithDetails);
+    res.json(validMatches);
   } catch (error) {
     console.error('Error fetching matches:', error);
-    res.status(500).json({ error: 'Failed to fetch matches' });
+    res.status(500).json({ error: 'Failed to fetch matches', details: error.message });
   }
 };
 
