@@ -109,32 +109,70 @@ exports.getMessages = async (req, res) => {
       return res.status(403).json({ error: 'You can only message users you have matched with' });
     }
 
-    // Get all messages between these users
+    // Get all messages between these users with proper sequencing
     const messages = await Message.find({
       $or: [
         { sender: userId, receiver: otherUserId },
         { sender: otherUserId, receiver: userId }
       ]
     })
-    .sort({ createdAt: 1 })
+    .sort({ 
+      createdAt: 1,      // Primary sort by creation time
+      sequenceNumber: 1  // Secondary sort by sequence number for tie-breaking
+    })
     .populate('sender', 'name profilePicture')
     .populate('receiver', 'name profilePicture')
     .populate('replyTo', 'text sender image')
     .populate('reactions.user', 'name profilePicture');
 
-    // Mark messages as read
-    await Message.updateMany(
-      { sender: otherUserId, receiver: userId, read: false },
-      { read: true }
-    );
+    // Mark messages as read and track read timestamp
+    const unreadMessages = await Message.find({
+      sender: otherUserId, 
+      receiver: userId, 
+      read: false
+    });
+
+    if (unreadMessages.length > 0) {
+      const readTimestamp = new Date();
+      await Message.updateMany(
+        { sender: otherUserId, receiver: userId, read: false },
+        { 
+          read: true,
+          readAt: readTimestamp
+        }
+      );
+
+      // Emit read receipt to sender for real-time UI update
+      const io = req.app.get('io');
+      const onlineUsers = req.app.get('onlineUsers');
+      
+      if (io && onlineUsers) {
+        const senderSocketId = onlineUsers.get(otherUserId);
+        if (senderSocketId) {
+          // Send read receipt for each message that was marked as read
+          unreadMessages.forEach(msg => {
+            io.to(senderSocketId).emit('message:read_update', {
+              messageId: msg._id,
+              readBy: userId,
+              readAt: readTimestamp,
+              clientSideId: msg.clientSideId
+            });
+          });
+        }
+      }
+    }
 
     const formattedMessages = messages.map(msg => ({
       id: msg._id,
       senderId: msg.sender._id,
       text: msg.text,
       image: msg.image,
+      imagePublicId: msg.imagePublicId,
       timestamp: msg.createdAt,
       read: msg.read,
+      readAt: msg.readAt,
+      clientSideId: msg.clientSideId,
+      sequenceNumber: msg.sequenceNumber,
       replyTo: msg.replyTo ? {
         id: msg.replyTo._id,
         text: msg.replyTo.text,
@@ -163,10 +201,46 @@ exports.getMessages = async (req, res) => {
 exports.sendMessage = async (req, res) => {
   try {
     const userId = req.userId;
-    const { receiverId, text, replyToId } = req.body;
+    const { receiverId, text, replyToId, clientSideId, image, imagePublicId } = req.body;
 
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: 'Message text is required' });
+    if (!clientSideId) {
+      return res.status(400).json({ error: 'clientSideId is required to prevent duplicate messages' });
+    }
+
+    // Validate that we have either text or image
+    if ((!text || !text.trim()) && !image) {
+      return res.status(400).json({ error: 'Message must contain either text or image' });
+    }
+
+    // Check for duplicate message using clientSideId
+    const existingMessage = await Message.findOne({ clientSideId });
+    if (existingMessage) {
+      // Return the existing message instead of creating a duplicate
+      const populatedMessage = await Message.findById(existingMessage._id)
+        .populate('sender', 'name profilePicture')
+        .populate('receiver', 'name profilePicture')
+        .populate('replyTo', 'text sender image')
+        .populate('reactions.user', 'name profilePicture');
+
+      return res.status(200).json({
+        id: populatedMessage._id,
+        senderId: populatedMessage.sender._id,
+        text: populatedMessage.text,
+        image: populatedMessage.image,
+        imagePublicId: populatedMessage.imagePublicId,
+        timestamp: populatedMessage.createdAt,
+        read: populatedMessage.read,
+        readAt: populatedMessage.readAt,
+        clientSideId: populatedMessage.clientSideId,
+        sequenceNumber: populatedMessage.sequenceNumber,
+        replyTo: populatedMessage.replyTo ? {
+          id: populatedMessage.replyTo._id,
+          text: populatedMessage.replyTo.text,
+          image: populatedMessage.replyTo.image,
+          senderId: populatedMessage.replyTo.sender
+        } : null,
+        reactions: []
+      });
     }
 
     // Verify match exists
@@ -189,13 +263,28 @@ exports.sendMessage = async (req, res) => {
       }
     }
 
-    // Create message
-    const message = await Message.create({
+    // Create message data
+    const messageData = {
       sender: userId,
       receiver: receiverId,
-      text: text.trim(),
+      clientSideId,
       replyTo: replyToId || null
-    });
+    };
+
+    // Add text if provided
+    if (text && text.trim()) {
+      messageData.text = text.trim();
+    }
+
+    // Add image data if provided
+    if (image) {
+      messageData.image = image;
+      messageData.imagePublicId = imagePublicId;
+      messageData.type = 'image';
+    }
+
+    // Create message
+    const message = await Message.create(messageData);
 
     const populatedMessage = await Message.findById(message._id)
       .populate('sender', 'name profilePicture')
@@ -209,9 +298,11 @@ exports.sendMessage = async (req, res) => {
       const receiver = await User.findById(receiverId);
       
       if (receiver && receiver.notificationPreferences?.messages !== false) {
+        const notificationBody = image ? '📷 Sent an image' : text.substring(0, 100);
+        
         await notificationService.sendToUser(receiverId, {
           title: `New message from ${sender.name}`,
-          body: text.substring(0, 100),
+          body: notificationBody,
           icon: sender.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(sender.name)}&background=random`,
           data: {
             type: 'message',
@@ -229,8 +320,13 @@ exports.sendMessage = async (req, res) => {
       id: populatedMessage._id,
       senderId: populatedMessage.sender._id,
       text: populatedMessage.text,
+      image: populatedMessage.image,
+      imagePublicId: populatedMessage.imagePublicId,
       timestamp: populatedMessage.createdAt,
       read: populatedMessage.read,
+      readAt: populatedMessage.readAt,
+      clientSideId: populatedMessage.clientSideId,
+      sequenceNumber: populatedMessage.sequenceNumber,
       replyTo: populatedMessage.replyTo ? {
         id: populatedMessage.replyTo._id,
         text: populatedMessage.replyTo.text,
@@ -241,6 +337,15 @@ exports.sendMessage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error sending message:', error);
+    
+    // Handle duplicate key error for clientSideId
+    if (error.code === 11000 && error.keyPattern?.clientSideId) {
+      return res.status(409).json({ 
+        error: 'Message with this clientSideId already exists',
+        code: 'DUPLICATE_MESSAGE'
+      });
+    }
+    
     res.status(500).json({ error: 'Failed to send message' });
   }
 };
@@ -308,13 +413,119 @@ exports.markAsRead = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
+    // Don't update if already read
+    if (message.read) {
+      return res.json({ success: true, alreadyRead: true });
+    }
+
+    const readTimestamp = new Date();
     message.read = true;
+    message.readAt = readTimestamp;
     await message.save();
 
-    res.json({ success: true });
+    // Emit real-time read receipt to sender
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    
+    if (io && onlineUsers) {
+      const senderSocketId = onlineUsers.get(message.sender.toString());
+      if (senderSocketId) {
+        io.to(senderSocketId).emit('message:read_update', {
+          messageId: message._id,
+          readBy: userId,
+          readAt: readTimestamp,
+          clientSideId: message.clientSideId
+        });
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      readAt: readTimestamp,
+      messageId: message._id,
+      clientSideId: message.clientSideId
+    });
   } catch (error) {
     console.error('Error marking message as read:', error);
     res.status(500).json({ error: 'Failed to mark message as read' });
+  }
+};
+
+// Mark multiple messages as read (bulk operation)
+exports.markMultipleAsRead = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { messageIds } = req.body;
+
+    if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+      return res.status(400).json({ error: 'messageIds array is required' });
+    }
+
+    // Find unread messages that belong to this user
+    const messages = await Message.find({
+      _id: { $in: messageIds },
+      receiver: userId,
+      read: false
+    });
+
+    if (messages.length === 0) {
+      return res.json({ success: true, updatedCount: 0, message: 'No unread messages found' });
+    }
+
+    const readTimestamp = new Date();
+    
+    // Update all messages to read
+    await Message.updateMany(
+      { _id: { $in: messages.map(m => m._id) } },
+      { 
+        read: true,
+        readAt: readTimestamp
+      }
+    );
+
+    // Emit real-time read receipts to senders
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    
+    if (io && onlineUsers) {
+      // Group messages by sender to batch notifications
+      const senderUpdates = {};
+      messages.forEach(msg => {
+        const senderId = msg.sender.toString();
+        if (!senderUpdates[senderId]) {
+          senderUpdates[senderId] = [];
+        }
+        senderUpdates[senderId].push({
+          messageId: msg._id,
+          clientSideId: msg.clientSideId,
+          readBy: userId,
+          readAt: readTimestamp
+        });
+      });
+
+      // Send notifications to each sender
+      Object.keys(senderUpdates).forEach(senderId => {
+        const senderSocketId = onlineUsers.get(senderId);
+        if (senderSocketId) {
+          senderUpdates[senderId].forEach(update => {
+            io.to(senderSocketId).emit('message:read_update', update);
+          });
+        }
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      updatedCount: messages.length,
+      readAt: readTimestamp,
+      updatedMessages: messages.map(msg => ({
+        messageId: msg._id,
+        clientSideId: msg.clientSideId
+      }))
+    });
+  } catch (error) {
+    console.error('Error marking multiple messages as read:', error);
+    res.status(500).json({ error: 'Failed to mark messages as read' });
   }
 };
 
@@ -768,5 +979,111 @@ exports.clearMessageNotifications = async (req, res) => {
   } catch (error) {
     console.error('Error clearing notifications:', error);
     res.status(500).json({ error: 'Failed to clear notifications' });
+  }
+};
+
+// Generate Cloudinary signature for secure uploads
+exports.getCloudinarySignature = async (req, res) => {
+  try {
+    const crypto = require('crypto');
+    const userId = req.userId;
+    
+    // Generate timestamp
+    const timestamp = Math.round(Date.now() / 1000);
+    
+    // Define upload parameters
+    const uploadParams = {
+      timestamp: timestamp,
+      folder: 'messages', // Organize uploads in messages folder
+      resource_type: 'image',
+      allowed_formats: 'jpg,jpeg,png,gif,webp',
+      max_file_size: 10485760, // 10MB limit
+      context: `user_id=${userId}`, // Add user context for tracking
+      tags: 'message_image' // Tag for easy management
+    };
+    
+    // Create string to sign (alphabetically sorted parameters)
+    const paramsToSign = Object.keys(uploadParams)
+      .sort()
+      .map(key => `${key}=${uploadParams[key]}`)
+      .join('&');
+    
+    const stringToSign = `${paramsToSign}${process.env.CLOUDINARY_API_SECRET}`;
+    
+    // Generate signature
+    const signature = crypto
+      .createHash('sha256')
+      .update(stringToSign)
+      .digest('hex');
+    
+    // Return signature and upload parameters
+    res.json({
+      signature,
+      timestamp,
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY,
+      uploadParams: {
+        folder: uploadParams.folder,
+        resource_type: uploadParams.resource_type,
+        allowed_formats: uploadParams.allowed_formats,
+        max_file_size: uploadParams.max_file_size,
+        context: uploadParams.context,
+        tags: uploadParams.tags
+      }
+    });
+  } catch (error) {
+    console.error('Error generating Cloudinary signature:', error);
+    res.status(500).json({ error: 'Failed to generate upload signature' });
+  }
+};
+
+// Get WebRTC configuration with TURN server credentials
+exports.getWebRTCConfig = async (req, res) => {
+  try {
+    const userId = req.userId;
+    
+    // Base STUN servers (always included)
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
+    ];
+    
+    // Add TURN server if enabled and configured
+    if (process.env.ENABLE_TURN_SERVER === 'true' && 
+        process.env.TURN_SERVER_URL && 
+        process.env.TURN_USERNAME && 
+        process.env.TURN_PASSWORD) {
+      
+      iceServers.push({
+        urls: process.env.TURN_SERVER_URL,
+        username: process.env.TURN_USERNAME,
+        credential: process.env.TURN_PASSWORD
+      });
+      
+      console.log(`WebRTC config requested by user ${userId} - TURN server included`);
+    } else {
+      console.log(`WebRTC config requested by user ${userId} - STUN only`);
+    }
+    
+    // WebRTC configuration
+    const configuration = {
+      iceServers,
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'all', // Use both STUN and TURN
+      bundlePolicy: 'balanced',
+      rtcpMuxPolicy: 'require'
+    };
+    
+    res.json({
+      configuration,
+      hasTurnServer: process.env.ENABLE_TURN_SERVER === 'true',
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    console.error('Error generating WebRTC configuration:', error);
+    res.status(500).json({ error: 'Failed to generate WebRTC configuration' });
   }
 };

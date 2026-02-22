@@ -6,6 +6,12 @@ const authMiddleware = require('../middleware/auth');
 // All routes require authentication
 router.use(authMiddleware);
 
+// Get Cloudinary signature for secure uploads
+router.get('/cloudinary-sign', messageController.getCloudinarySignature);
+
+// Get WebRTC configuration with TURN server credentials
+router.get('/webrtc-config', messageController.getWebRTCConfig);
+
 // Get all matches
 router.get('/matches', messageController.getMatches);
 
@@ -26,6 +32,9 @@ router.post('/matches', messageController.createMatch);
 
 // Mark message as read
 router.put('/:messageId/read', messageController.markAsRead);
+
+// Mark multiple messages as read (bulk operation)
+router.put('/bulk-read', messageController.markMultipleAsRead);
 
 // Delete single message
 router.delete('/message/:messageId', messageController.deleteMessage);

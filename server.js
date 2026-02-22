@@ -94,8 +94,14 @@ const io = new Server(server, {
 // Initialize notification helper with io instance
 notificationHelper.setIO(io);
 
-// Store online users
+// Store online users and active calls
 const onlineUsers = new Map();
+const activeCalls = new Map(); // Track active calls: callId -> { caller, receiver, startTime, type }
+
+// Make io and onlineUsers accessible to controllers
+app.set('io', io);
+app.set('onlineUsers', onlineUsers);
+app.set('activeCalls', activeCalls);
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
@@ -119,7 +125,19 @@ io.on('connection', (socket) => {
 
   // Send message
   socket.on('message:send', async (data) => {
-    const { receiverId, senderId, text, image, replyToId } = data;
+    const { receiverId, senderId, text, image, imagePublicId, replyToId, clientSideId } = data;
+    
+    // Validate required fields
+    if (!clientSideId) {
+      socket.emit('message:error', { error: 'clientSideId is required' });
+      return;
+    }
+    
+    // Validate that we have either text or image
+    if ((!text || !text.trim()) && !image) {
+      socket.emit('message:error', { error: 'Message must contain either text or image' });
+      return;
+    }
     
     // Save message to database
     const Message = require('./models/Message');
@@ -127,10 +145,25 @@ io.on('connection', (socket) => {
     const User = require('./models/User');
     
     try {
+      // Check for duplicate message using clientSideId
+      const existingMessage = await Message.findOne({ clientSideId });
+      if (existingMessage) {
+        // Return existing message instead of creating duplicate
+        const populatedMessage = await Message.findById(existingMessage._id)
+          .populate('sender', 'name profilePicture')
+          .populate('receiver', 'name profilePicture')
+          .populate('replyTo', 'text sender image')
+          .populate('reactions.user', 'name profilePicture');
+
+        socket.emit('message:sent', populatedMessage);
+        return;
+      }
+
       const messageData = {
         sender: senderId,
         receiver: receiverId,
-        read: false
+        read: false,
+        clientSideId
       };
       
       // Add text if provided
@@ -138,9 +171,10 @@ io.on('connection', (socket) => {
         messageData.text = text.trim();
       }
       
-      // Add image if provided
+      // Add image data if provided
       if (image) {
         messageData.image = image;
+        messageData.imagePublicId = imagePublicId;
         messageData.type = 'image';
       }
       
@@ -168,7 +202,7 @@ io.on('connection', (socket) => {
       
       // Create notification for receiver
       const sender = await User.findById(senderId);
-      const messagePreview = text ? (text.length > 50 ? text.substring(0, 50) + '...' : text) : '📷 Image';
+      const messagePreview = image ? '📷 Sent an image' : (text ? (text.length > 50 ? text.substring(0, 50) + '...' : text) : 'New message');
       
       await Notification.createAndEmit({
         recipient: receiverId,
@@ -177,23 +211,110 @@ io.on('connection', (socket) => {
         title: `New message from ${sender.name}`,
         message: messagePreview,
         link: `/messages`,
-        data: { messageId: message._id }
+        data: { messageId: message._id, clientSideId: message.clientSideId }
       }, io);
       
     } catch (error) {
       console.error('Error saving message:', error);
-      socket.emit('message:error', { error: 'Failed to send message' });
+      
+      // Handle duplicate key error for clientSideId
+      if (error.code === 11000 && error.keyPattern?.clientSideId) {
+        socket.emit('message:error', { 
+          error: 'Message with this clientSideId already exists',
+          code: 'DUPLICATE_MESSAGE'
+        });
+      } else {
+        socket.emit('message:error', { error: 'Failed to send message' });
+      }
     }
   });
 
   // Mark message as read
-  socket.on('message:read', async (messageId) => {
+  socket.on('message:read', async (data) => {
+    const { messageId, messageIds } = data;
     const Message = require('./models/Message');
+    
     try {
-      await Message.findByIdAndUpdate(messageId, { read: true });
-      socket.emit('message:read:success', messageId);
+      const readTimestamp = new Date();
+      let updatedMessages = [];
+
+      if (messageIds && Array.isArray(messageIds)) {
+        // Bulk mark multiple messages as read
+        const messages = await Message.find({
+          _id: { $in: messageIds },
+          receiver: socket.userId,
+          read: false
+        });
+
+        if (messages.length > 0) {
+          await Message.updateMany(
+            { _id: { $in: messageIds }, receiver: socket.userId, read: false },
+            { read: true, readAt: readTimestamp }
+          );
+
+          // Send read receipts to senders
+          const senderUpdates = {};
+          messages.forEach(msg => {
+            const senderId = msg.sender.toString();
+            if (!senderUpdates[senderId]) {
+              senderUpdates[senderId] = [];
+            }
+            senderUpdates[senderId].push({
+              messageId: msg._id,
+              clientSideId: msg.clientSideId,
+              readBy: socket.userId,
+              readAt: readTimestamp
+            });
+          });
+
+          // Emit to each sender
+          Object.keys(senderUpdates).forEach(senderId => {
+            const senderSocketId = onlineUsers.get(senderId);
+            if (senderSocketId) {
+              senderUpdates[senderId].forEach(update => {
+                io.to(senderSocketId).emit('message:read_update', update);
+              });
+            }
+          });
+
+          updatedMessages = messages.map(msg => ({
+            messageId: msg._id,
+            clientSideId: msg.clientSideId
+          }));
+        }
+      } else if (messageId) {
+        // Single message read
+        const message = await Message.findById(messageId);
+        if (message && message.receiver.toString() === socket.userId && !message.read) {
+          message.read = true;
+          message.readAt = readTimestamp;
+          await message.save();
+
+          // Send read receipt to sender
+          const senderSocketId = onlineUsers.get(message.sender.toString());
+          if (senderSocketId) {
+            io.to(senderSocketId).emit('message:read_update', {
+              messageId: message._id,
+              clientSideId: message.clientSideId,
+              readBy: socket.userId,
+              readAt: readTimestamp
+            });
+          }
+
+          updatedMessages = [{
+            messageId: message._id,
+            clientSideId: message.clientSideId
+          }];
+        }
+      }
+
+      socket.emit('message:read:success', { 
+        updatedMessages,
+        readAt: readTimestamp
+      });
     } catch (error) {
       console.error('Error marking message as read:', error);
+      socket.emit('message:read:error', { error: 'Failed to mark message as read' });
     }
   });
 
@@ -214,40 +335,131 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Call signaling
+  // Call signaling with acknowledgment and timeout handling
   socket.on('call:offer', (data) => {
     const { to, offer, type } = data;
     const receiverSocketId = onlineUsers.get(to);
+    
     if (receiverSocketId) {
+      const callId = `${socket.userId}_${to}_${Date.now()}`;
+      
+      // Store active call information
+      activeCalls.set(callId, {
+        caller: socket.userId,
+        receiver: to,
+        startTime: Date.now(),
+        type: type,
+        status: 'calling'
+      });
+      
+      // Send call offer to receiver
       io.to(receiverSocketId).emit('call:incoming', { 
         from: socket.userId, 
         offer,
-        type 
+        type,
+        callId
       });
+      
+      // Set call timeout (30 seconds)
+      setTimeout(() => {
+        const call = activeCalls.get(callId);
+        if (call && call.status === 'calling') {
+          // Call timed out
+          activeCalls.delete(callId);
+          
+          // Notify caller of timeout
+          socket.emit('call:timeout');
+          
+          // Notify receiver to stop ringing
+          const receiverSocket = onlineUsers.get(to);
+          if (receiverSocket) {
+            io.to(receiverSocket).emit('call:timeout');
+          }
+          
+          console.log(`Call ${callId} timed out`);
+        }
+      }, 30000); // 30 second timeout
+      
+      console.log(`Call offer sent: ${callId} (${type})`);
+    } else {
+      // Receiver is offline
+      socket.emit('call:user_offline');
+    }
+  });
+
+  // Call received acknowledgment
+  socket.on('call:received', (data) => {
+    const { callId, from } = data;
+    const call = activeCalls.get(callId);
+    
+    if (call && call.caller === from) {
+      // Update call status
+      call.status = 'ringing';
+      activeCalls.set(callId, call);
+      
+      // Notify caller that receiver got the call (show "Ringing" state)
+      const callerSocketId = onlineUsers.get(from);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:ringing', { callId });
+      }
+      
+      console.log(`Call ${callId} acknowledged - now ringing`);
     }
   });
 
   socket.on('call:answer', (data) => {
-    const { to, answer } = data;
-    const receiverSocketId = onlineUsers.get(to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('call:accepted', { answer });
+    const { to, answer, callId } = data;
+    const call = activeCalls.get(callId);
+    
+    if (call) {
+      // Update call status
+      call.status = 'connected';
+      call.connectedAt = Date.now();
+      activeCalls.set(callId, call);
+      
+      const receiverSocketId = onlineUsers.get(to);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('call:accepted', { answer, callId });
+      }
+      
+      console.log(`Call ${callId} accepted and connected`);
     }
   });
 
   socket.on('call:reject', (data) => {
-    const { to } = data;
-    const receiverSocketId = onlineUsers.get(to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('call:rejected');
+    const { to, callId } = data;
+    const call = activeCalls.get(callId);
+    
+    if (call) {
+      // Remove call from active calls
+      activeCalls.delete(callId);
+      
+      const receiverSocketId = onlineUsers.get(to);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('call:rejected', { callId });
+      }
+      
+      console.log(`Call ${callId} rejected`);
     }
   });
 
   socket.on('call:end', (data) => {
-    const { to } = data;
-    const receiverSocketId = onlineUsers.get(to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('call:ended');
+    const { to, callId } = data;
+    const call = activeCalls.get(callId);
+    
+    if (call) {
+      // Calculate call duration
+      const duration = call.connectedAt ? Date.now() - call.connectedAt : 0;
+      
+      // Remove call from active calls
+      activeCalls.delete(callId);
+      
+      const receiverSocketId = onlineUsers.get(to);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit('call:ended', { callId, duration });
+      }
+      
+      console.log(`Call ${callId} ended - duration: ${Math.round(duration / 1000)}s`);
     }
   });
 
@@ -259,12 +471,37 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Disconnect
+  // Disconnect cleanup - automatically end active calls
   socket.on('disconnect', () => {
     if (socket.userId) {
+      // Find and end any active calls involving this user
+      const userCalls = Array.from(activeCalls.entries()).filter(([callId, call]) => 
+        call.caller === socket.userId || call.receiver === socket.userId
+      );
+      
+      userCalls.forEach(([callId, call]) => {
+        // Determine the other party
+        const otherUserId = call.caller === socket.userId ? call.receiver : call.caller;
+        const otherSocketId = onlineUsers.get(otherUserId);
+        
+        if (otherSocketId) {
+          // Notify the other party that the call ended due to disconnect
+          io.to(otherSocketId).emit('call:ended', { 
+            callId, 
+            reason: 'user_disconnected',
+            duration: call.connectedAt ? Date.now() - call.connectedAt : 0
+          });
+        }
+        
+        // Remove the call
+        activeCalls.delete(callId);
+        console.log(`Call ${callId} ended due to user ${socket.userId} disconnect`);
+      });
+      
+      // Remove user from online users
       onlineUsers.delete(socket.userId);
       io.emit('user:offline', socket.userId);
-      console.log(`User ${socket.userId} disconnected`);
+      console.log(`User ${socket.userId} disconnected - ${userCalls.length} calls ended`);
     }
   });
 });

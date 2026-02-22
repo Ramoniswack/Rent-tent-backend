@@ -2,7 +2,7 @@ const Match = require('../models/Match');
 const User = require('../models/User');
 const mongoose = require('mongoose');
 
-// Discover potential matches with geospatial filtering
+// Discover potential matches with optimized geospatial filtering and database-level scoring
 exports.discover = async (req, res) => {
   try {
     const userId = req.userId;
@@ -12,7 +12,7 @@ exports.discover = async (req, res) => {
       return res.status(400).json({ error: 'Invalid user ID' });
     }
 
-    // Get current user with location
+    // Get current user with location and preferences
     const currentUser = await User.findById(userId);
     if (!currentUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -30,32 +30,12 @@ exports.discover = async (req, res) => {
     const [longitude, latitude] = currentUser.geoLocation.coordinates;
     const maxDistance = (currentUser.matchPreferences?.locationRange || 50) * 1000; // Convert km to meters
 
-    // Build match preferences filter
-    const matchFilter = {};
-    
-    // Age range filter
-    if (currentUser.matchPreferences?.ageRange && currentUser.matchPreferences.ageRange.length === 2) {
-      const [minAge, maxAge] = currentUser.matchPreferences.ageRange;
-      matchFilter.age = { 
-        $gte: minAge.toString(), 
-        $lte: maxAge.toString() 
-      };
-    }
-
-    // Gender preference filter
-    if (currentUser.matchPreferences?.genders && currentUser.matchPreferences.genders.length > 0) {
-      matchFilter.gender = { $in: currentUser.matchPreferences.genders };
-    }
-
-    // Travel style filter
-    if (currentUser.matchPreferences?.travelStyles && currentUser.matchPreferences.travelStyles.length > 0) {
-      matchFilter.travelStyle = { $in: currentUser.matchPreferences.travelStyles };
-    }
-
-    // Interests filter (at least one common interest)
-    if (currentUser.matchPreferences?.interests && currentUser.matchPreferences.interests.length > 0) {
-      matchFilter.interests = { $in: currentUser.matchPreferences.interests };
-    }
+    // Extract user preferences with defaults
+    const userPreferences = currentUser.matchPreferences || {};
+    const ageRange = userPreferences.ageRange || [18, 60];
+    const preferredGenders = userPreferences.genders || [];
+    const preferredTravelStyles = userPreferences.travelStyles || [];
+    const preferredInterests = userPreferences.interests || [];
 
     // Get all users current user has already interacted with
     const existingMatches = await Match.find({
@@ -76,9 +56,54 @@ exports.discover = async (req, res) => {
     // Add current user to excluded list
     excludedUserIds.push(userId);
 
-    // Aggregation pipeline for discovery
+    // Build hard filters for $match stage
+    const hardFilters = {
+      _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
+      'preferences.publicProfile': true // Only show users with public profiles
+    };
+
+    // Age filter - convert to numeric comparison
+    if (ageRange && ageRange.length === 2) {
+      const [minAge, maxAge] = ageRange;
+      hardFilters.$expr = {
+        $and: [
+          {
+            $or: [
+              { $eq: ['$age', null] }, // Include users without age set
+              {
+                $and: [
+                  { $gte: [{ $toInt: { $ifNull: ['$age', minAge] } }, minAge] },
+                  { $lte: [{ $toInt: { $ifNull: ['$age', maxAge] } }, maxAge] }
+                ]
+              }
+            ]
+          }
+        ]
+      };
+    }
+
+    // Gender filter - only apply if specific genders are selected
+    if (preferredGenders.length > 0 && !preferredGenders.includes('Any')) {
+      hardFilters.$or = [
+        { gender: { $in: preferredGenders } },
+        { gender: { $exists: false } }, // Include users without gender set
+        { gender: null }
+      ];
+    }
+
+    // Travel style filter - only apply if specific styles are selected
+    if (preferredTravelStyles.length > 0) {
+      if (!hardFilters.$or) hardFilters.$or = [];
+      hardFilters.$or.push(
+        { travelStyle: { $in: preferredTravelStyles } },
+        { travelStyle: { $exists: false } }, // Include users without travel style set
+        { travelStyle: null }
+      );
+    }
+
+    // Optimized Aggregation Pipeline
     const discoveryPipeline = [
-      // Stage 1: Geospatial query
+      // Stage 1: $geoNear - MUST be first stage for index efficiency
       {
         $geoNear: {
           near: {
@@ -88,18 +113,136 @@ exports.discover = async (req, res) => {
           distanceField: 'distance',
           maxDistance: maxDistance,
           spherical: true,
-          key: 'geoLocation'
+          key: 'geoLocation',
+          // Apply basic exclusions at geospatial level for efficiency
+          query: {
+            _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
+            'preferences.publicProfile': true
+          }
         }
       },
-      // Stage 2: Exclude already swiped users and current user
+      
+      // Stage 2: $match - Apply all hard filters at database level
       {
-        $match: {
-          _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
-          'preferences.publicProfile': true, // Only show users with public profiles
-          ...matchFilter
+        $match: hardFilters
+      },
+      
+      // Stage 3: $addFields - Calculate weighted compatibility scores
+      {
+        $addFields: {
+          // Travel Style Score: 1.5x weight for matching travel styles
+          travelStyleScore: {
+            $cond: {
+              if: { $gt: [{ $size: preferredTravelStyles }, 0] }, // Only if user has style preferences
+              then: {
+                $multiply: [
+                  1.5, // 1.5x weight
+                  {
+                    $size: {
+                      $ifNull: [
+                        {
+                          $setIntersection: [
+                            {
+                              $cond: {
+                                if: { $isArray: '$travelStyle' },
+                                then: '$travelStyle',
+                                else: { $cond: { if: { $ne: ['$travelStyle', null] }, then: ['$travelStyle'], else: [] } }
+                              }
+                            },
+                            preferredTravelStyles
+                          ]
+                        },
+                        []
+                      ]
+                    }
+                  }
+                ]
+              },
+              else: 0 // No style preferences = no style score
+            }
+          },
+          
+          // Interest Score: 1.0x weight for matching interests
+          interestScore: {
+            $cond: {
+              if: { $gt: [{ $size: preferredInterests }, 0] }, // Only if user has interest preferences
+              then: {
+                $size: {
+                  $ifNull: [
+                    {
+                      $setIntersection: [
+                        { $ifNull: ['$interests', []] },
+                        preferredInterests
+                      ]
+                    },
+                    []
+                  ]
+                }
+              },
+              else: 0 // No interest preferences = no interest score
+            }
+          },
+          
+          // Distance Score: Inverse distance score (closer = higher score)
+          distanceScore: {
+            $subtract: [
+              1,
+              { $divide: ['$distance', maxDistance] }
+            ]
+          }
         }
       },
-      // Stage 3: Project only necessary fields
+      
+      // Stage 4: $addFields - Calculate total weighted score
+      {
+        $addFields: {
+          totalScore: {
+            $add: [
+              '$travelStyleScore', // Already weighted at 1.5x
+              '$interestScore',    // Already weighted at 1.0x
+              { $multiply: ['$distanceScore', 0.5] } // Distance gets 0.5x weight
+            ]
+          },
+          
+          // Add a randomization factor for users with no preferences or equal scores
+          randomFactor: {
+            $cond: {
+              if: {
+                $and: [
+                  { $eq: [{ $size: preferredTravelStyles }, 0] },
+                  { $eq: [{ $size: preferredInterests }, 0] }
+                ]
+              },
+              then: { $rand: {} }, // Full randomization if no preferences
+              else: { $multiply: [{ $rand: {} }, 0.1] } // Small random factor for tie-breaking
+            }
+          }
+        }
+      },
+      
+      // Stage 5: $addFields - Final score with randomization
+      {
+        $addFields: {
+          finalScore: {
+            $add: ['$totalScore', '$randomFactor']
+          }
+        }
+      },
+      
+      // Stage 6: $sort - Sort by final score (desc) then distance (asc)
+      {
+        $sort: {
+          finalScore: -1,
+          distance: 1
+        }
+      },
+      
+      // Stage 7: $limit - Limit results to 20 for performance
+      {
+        $limit: 20
+      },
+      
+      // Stage 8: $project - Return only necessary fields
       {
         $project: {
           name: 1,
@@ -113,18 +256,32 @@ exports.discover = async (req, res) => {
           travelStyle: 1,
           languages: 1,
           upcomingTrips: 1,
-          distance: 1
+          distance: 1,
+          // Include scores for debugging/analytics
+          travelStyleScore: 1,
+          interestScore: 1,
+          distanceScore: 1,
+          totalScore: 1,
+          finalScore: 1
         }
-      },
-      // Stage 4: Randomize results
-      {
-        $sample: { size: 20 }
       }
     ];
 
+    console.log('Discovery pipeline executing with preferences:', {
+      userId,
+      ageRange,
+      preferredGenders,
+      preferredTravelStyles,
+      preferredInterests,
+      maxDistanceKm: maxDistance / 1000,
+      excludedCount: excludedUserIds.length
+    });
+
     const potentialMatches = await User.aggregate(discoveryPipeline);
 
-    // Format response for mobile frontend
+    console.log(`Found ${potentialMatches.length} potential matches`);
+
+    // Format response for frontend
     const formattedMatches = potentialMatches.map(user => ({
       id: user._id.toString(),
       name: user.name,
@@ -138,13 +295,27 @@ exports.discover = async (req, res) => {
       interests: user.interests || [],
       travelStyle: user.travelStyle || '',
       languages: user.languages || [],
-      upcomingTrips: user.upcomingTrips || []
+      upcomingTrips: user.upcomingTrips || [],
+      // Include match scores for frontend analytics
+      matchScore: {
+        total: Math.round((user.finalScore || 0) * 100) / 100,
+        travelStyle: Math.round((user.travelStyleScore || 0) * 100) / 100,
+        interests: Math.round((user.interestScore || 0) * 100) / 100,
+        distance: Math.round((user.distanceScore || 0) * 100) / 100
+      }
     }));
 
     res.json({
       success: true,
       count: formattedMatches.length,
-      profiles: formattedMatches
+      profiles: formattedMatches,
+      appliedFilters: {
+        ageRange: ageRange,
+        genders: preferredGenders,
+        travelStyles: preferredTravelStyles,
+        interests: preferredInterests,
+        locationRange: maxDistance / 1000
+      }
     });
 
   } catch (error) {
