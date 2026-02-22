@@ -24,4 +24,7 @@ router.get('/check/:userId', matchController.checkMatch);
 // Reset interactions (clear match history)
 router.delete('/reset', matchController.resetInteractions);
 
+// Cancel connection request
+router.post('/cancel', matchController.cancelConnection);
+
 module.exports = router;

@@ -18,266 +18,52 @@ exports.discover = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check if user has geolocation set
-    if (!currentUser.geoLocation || !currentUser.geoLocation.coordinates || 
-        currentUser.geoLocation.coordinates.length !== 2) {
-      return res.status(400).json({ 
-        error: 'Location not set. Please update your location in settings.',
-        requiresLocation: true
-      });
-    }
-
-    const [longitude, latitude] = currentUser.geoLocation.coordinates;
-    const maxDistance = (currentUser.matchPreferences?.locationRange || 50) * 1000; // Convert km to meters
-
-    // Extract user preferences with defaults
-    const userPreferences = currentUser.matchPreferences || {};
-    const ageRange = userPreferences.ageRange || [18, 60];
-    const preferredGenders = Array.isArray(userPreferences.genders) ? userPreferences.genders : [];
-    const preferredTravelStyles = Array.isArray(userPreferences.travelStyles) ? userPreferences.travelStyles : [];
-    const preferredInterests = Array.isArray(userPreferences.interests) ? userPreferences.interests : [];
-
     // Get all users current user has already interacted with
     const existingMatches = await Match.find({
       $or: [
-        { user1: userId, user1Status: { $in: ['like', 'pass'] } },
-        { user2: userId, user2Status: { $in: ['like', 'pass'] } }
+        { user1: userId },
+        { user2: userId }
       ]
     }).lean();
 
-    // Extract user IDs to exclude
-    const excludedUserIds = existingMatches.map(match => {
-      if (match.user1.toString() === userId) {
-        return match.user2.toString();
-      }
-      return match.user1.toString();
-    });
-    
-    // Add current user to excluded list
-    excludedUserIds.push(userId);
-
-    // Build hard filters for $match stage
-    const hardFilters = {
-      _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
-      'preferences.publicProfile': true // Only show users with public profiles
-    };
-
-    // Age filter - convert to numeric comparison
-    if (ageRange && ageRange.length === 2) {
-      const [minAge, maxAge] = ageRange;
-      hardFilters.$expr = {
-        $and: [
-          {
-            $or: [
-              { $eq: ['$age', null] }, // Include users without age set
-              {
-                $and: [
-                  { $gte: [{ $toInt: { $ifNull: ['$age', minAge] } }, minAge] },
-                  { $lte: [{ $toInt: { $ifNull: ['$age', maxAge] } }, maxAge] }
-                ]
-              }
-            ]
-          }
-        ]
+    // Create a map of user interactions
+    const userInteractions = {};
+    existingMatches.forEach(match => {
+      const isUser1 = match.user1.toString() === userId;
+      const otherUserId = isUser1 ? match.user2.toString() : match.user1.toString();
+      const myStatus = isUser1 ? match.user1Status : match.user2Status;
+      const theirStatus = isUser1 ? match.user2Status : match.user1Status;
+      
+      userInteractions[otherUserId] = {
+        myStatus,
+        theirStatus,
+        matched: match.matched
       };
-    }
-
-    // Gender filter - only apply if specific genders are selected
-    if (preferredGenders.length > 0 && !preferredGenders.includes('Any')) {
-      hardFilters.$or = [
-        { gender: { $in: preferredGenders } },
-        { gender: { $exists: false } }, // Include users without gender set
-        { gender: null }
-      ];
-    }
-
-    // Travel style filter - only apply if specific styles are selected
-    if (preferredTravelStyles.length > 0) {
-      if (!hardFilters.$or) hardFilters.$or = [];
-      hardFilters.$or.push(
-        { travelStyle: { $in: preferredTravelStyles } },
-        { travelStyle: { $exists: false } }, // Include users without travel style set
-        { travelStyle: null }
-      );
-    }
-
-    // Optimized Aggregation Pipeline
-    const discoveryPipeline = [
-      // Stage 1: $geoNear - MUST be first stage for index efficiency
-      {
-        $geoNear: {
-          near: {
-            type: 'Point',
-            coordinates: [longitude, latitude]
-          },
-          distanceField: 'distance',
-          maxDistance: maxDistance,
-          spherical: true,
-          key: 'geoLocation',
-          // Apply basic exclusions at geospatial level for efficiency
-          query: {
-            _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
-            'preferences.publicProfile': true
-          }
-        }
-      },
-      
-      // Stage 2: $match - Apply all hard filters at database level
-      {
-        $match: hardFilters
-      },
-      
-      // Stage 3: $addFields - Calculate weighted compatibility scores
-      {
-        $addFields: {
-          // Travel Style Score: 1.5x weight for matching travel styles
-          travelStyleScore: {
-            $cond: {
-              if: preferredTravelStyles.length > 0, // Check JavaScript array length
-              then: {
-                $multiply: [
-                  1.5, // 1.5x weight
-                  {
-                    $size: {
-                      $ifNull: [
-                        {
-                          $setIntersection: [
-                            {
-                              $cond: {
-                                if: { $isArray: '$travelStyle' },
-                                then: '$travelStyle',
-                                else: { $cond: { if: { $ne: ['$travelStyle', null] }, then: ['$travelStyle'], else: [] } }
-                              }
-                            },
-                            preferredTravelStyles
-                          ]
-                        },
-                        []
-                      ]
-                    }
-                  }
-                ]
-              },
-              else: 0 // No style preferences = no style score
-            }
-          },
-          
-          // Interest Score: 1.0x weight for matching interests
-          interestScore: {
-            $cond: {
-              if: preferredInterests.length > 0, // Check JavaScript array length
-              then: {
-                $size: {
-                  $ifNull: [
-                    {
-                      $setIntersection: [
-                        { $ifNull: ['$interests', []] },
-                        preferredInterests
-                      ]
-                    },
-                    []
-                  ]
-                }
-              },
-              else: 0 // No interest preferences = no interest score
-            }
-          },
-          
-          // Distance Score: Inverse distance score (closer = higher score)
-          distanceScore: {
-            $subtract: [
-              1,
-              { $divide: ['$distance', maxDistance] }
-            ]
-          }
-        }
-      },
-      
-      // Stage 4: $addFields - Calculate total weighted score
-      {
-        $addFields: {
-          totalScore: {
-            $add: [
-              '$travelStyleScore', // Already weighted at 1.5x
-              '$interestScore',    // Already weighted at 1.0x
-              { $multiply: ['$distanceScore', 0.5] } // Distance gets 0.5x weight
-            ]
-          },
-          
-          // Add a randomization factor for users with no preferences or equal scores
-          randomFactor: {
-            $cond: {
-              if: (preferredTravelStyles.length === 0 && preferredInterests.length === 0), // Check JavaScript arrays
-              then: { $rand: {} }, // Full randomization if no preferences
-              else: { $multiply: [{ $rand: {} }, 0.1] } // Small random factor for tie-breaking
-            }
-          }
-        }
-      },
-      
-      // Stage 5: $addFields - Final score with randomization
-      {
-        $addFields: {
-          finalScore: {
-            $add: ['$totalScore', '$randomFactor']
-          }
-        }
-      },
-      
-      // Stage 6: $sort - Sort by final score (desc) then distance (asc)
-      {
-        $sort: {
-          finalScore: -1,
-          distance: 1
-        }
-      },
-      
-      // Stage 7: $limit - Limit results to 20 for performance
-      {
-        $limit: 20
-      },
-      
-      // Stage 8: $project - Return only necessary fields
-      {
-        $project: {
-          name: 1,
-          username: 1,
-          profilePicture: 1,
-          bio: 1,
-          age: 1,
-          gender: 1,
-          location: 1,
-          interests: 1,
-          travelStyle: 1,
-          languages: 1,
-          upcomingTrips: 1,
-          distance: 1,
-          // Include scores for debugging/analytics
-          travelStyleScore: 1,
-          interestScore: 1,
-          distanceScore: 1,
-          totalScore: 1,
-          finalScore: 1
-        }
-      }
-    ];
-
-    console.log('Discovery pipeline executing with preferences:', {
-      userId,
-      ageRange,
-      preferredGenders,
-      preferredTravelStyles,
-      preferredInterests,
-      maxDistanceKm: maxDistance / 1000,
-      excludedCount: excludedUserIds.length
     });
 
-    const potentialMatches = await User.aggregate(discoveryPipeline);
+    // Only exclude current user and matched users
+    const excludedUserIds = [userId];
+    existingMatches.forEach(match => {
+      if (match.matched) {
+        const isUser1 = match.user1.toString() === userId;
+        const otherUserId = isUser1 ? match.user2.toString() : match.user1.toString();
+        excludedUserIds.push(otherUserId);
+      }
+    });
 
-    console.log(`Found ${potentialMatches.length} potential matches`);
+    // Get all users except excluded ones
+    const allUsers = await User.find({
+      _id: { $nin: excludedUserIds.map(id => new mongoose.Types.ObjectId(id)) },
+      'preferences.publicProfile': { $ne: false }
+    })
+    .select('name username profilePicture bio age gender location interests travelStyle languages upcomingTrips')
+    .limit(100)
+    .lean();
+
+    console.log(`Found ${allUsers.length} potential matches (showing all users)`);
 
     // Get connection counts for all matched users
-    const userIds = potentialMatches.map(u => u._id);
+    const userIds = allUsers.map(u => u._id);
     const connectionCounts = await Match.aggregate([
       {
         $match: {
@@ -308,41 +94,44 @@ exports.discover = async (req, res) => {
     });
 
     // Format response for frontend
-    const formattedMatches = potentialMatches.map(user => ({
-      id: user._id.toString(),
-      name: user.name,
-      username: user.username,
-      profilePicture: user.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
-      bio: user.bio || '',
-      age: user.age || 'N/A',
-      gender: user.gender || 'N/A',
-      location: user.location || 'Unknown',
-      distance: Math.round(user.distance / 1000), // Convert to km
-      interests: user.interests || [],
-      travelStyle: user.travelStyle || '',
-      languages: user.languages || [],
-      upcomingTrips: user.upcomingTrips || [],
-      totalConnections: connectionMap[user._id.toString()] || 0,
-      // Include match scores for frontend analytics
-      matchScore: {
-        total: Math.round((user.finalScore || 0) * 100) / 100,
-        travelStyle: Math.round((user.travelStyleScore || 0) * 100) / 100,
-        interests: Math.round((user.interestScore || 0) * 100) / 100,
-        distance: Math.round((user.distanceScore || 0) * 100) / 100
+    const formattedMatches = allUsers.map(user => {
+      const userId = user._id.toString();
+      const interaction = userInteractions[userId];
+      
+      // Determine connection status
+      let connectionStatus = 'none';
+      if (interaction) {
+        if (interaction.matched) {
+          connectionStatus = 'connected';
+        } else if (interaction.myStatus === 'like') {
+          connectionStatus = 'sent';
+        } else if (interaction.theirStatus === 'like') {
+          connectionStatus = 'pending';
+        }
       }
-    }));
+      
+      return {
+        id: userId,
+        name: user.name,
+        username: user.username,
+        profilePicture: user.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
+        bio: user.bio || '',
+        age: user.age || 'N/A',
+        gender: user.gender || 'N/A',
+        location: user.location || 'Unknown',
+        interests: user.interests || [],
+        travelStyle: user.travelStyle || '',
+        languages: user.languages || [],
+        upcomingTrips: user.upcomingTrips || [],
+        totalConnections: connectionMap[userId] || 0,
+        connectionStatus: connectionStatus
+      };
+    });
 
     res.json({
       success: true,
       count: formattedMatches.length,
-      profiles: formattedMatches,
-      appliedFilters: {
-        ageRange: ageRange,
-        genders: preferredGenders,
-        travelStyles: preferredTravelStyles,
-        interests: preferredInterests,
-        locationRange: maxDistance / 1000
-      }
+      profiles: formattedMatches
     });
 
   } catch (error) {
@@ -1009,5 +798,61 @@ exports.resetInteractions = async (req, res) => {
   } catch (error) {
     console.error('Reset interactions error:', error);
     res.status(500).json({ error: error.message });
+  }
+};
+
+// POST /api/matches/cancel - Cancel a sent connection request
+exports.cancelConnection = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { targetUserId } = req.body;
+
+    // Validate inputs
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return res.status(400).json({ error: 'Invalid target user ID' });
+    }
+
+    // Sort user IDs to maintain consistency
+    const [user1, user2] = [userId, targetUserId].sort();
+    const isUser1 = userId === user1;
+
+    // Find the match
+    const match = await Match.findOne({ user1, user2 });
+
+    if (!match) {
+      return res.status(404).json({ error: 'Connection request not found' });
+    }
+
+    // Check if user has sent a connection (status is 'like')
+    const myStatus = isUser1 ? match.user1Status : match.user2Status;
+    
+    if (myStatus !== 'like') {
+      return res.status(400).json({ error: 'No connection request to cancel' });
+    }
+
+    // Check if it's already matched
+    if (match.matched) {
+      return res.status(400).json({ error: 'Cannot cancel a matched connection. Use unmatch instead.' });
+    }
+
+    // Delete the match record since it's just a pending connection
+    await Match.deleteOne({ user1, user2 });
+
+    console.log(`User ${userId} cancelled connection request to ${targetUserId}`);
+
+    res.json({ 
+      success: true,
+      message: 'Connection request cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Cancel connection error:', error);
+    res.status(500).json({ 
+      error: 'Failed to cancel connection request',
+      message: error.message 
+    });
   }
 };
