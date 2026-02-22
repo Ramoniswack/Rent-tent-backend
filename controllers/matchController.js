@@ -276,6 +276,37 @@ exports.discover = async (req, res) => {
 
     console.log(`Found ${potentialMatches.length} potential matches`);
 
+    // Get connection counts for all matched users
+    const userIds = potentialMatches.map(u => u._id);
+    const connectionCounts = await Match.aggregate([
+      {
+        $match: {
+          $or: [
+            { user1: { $in: userIds }, matched: true },
+            { user2: { $in: userIds }, matched: true }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ['$user1', userIds] },
+              '$user1',
+              '$user2'
+            ]
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a map of userId -> connection count
+    const connectionMap = {};
+    connectionCounts.forEach(item => {
+      connectionMap[item._id.toString()] = item.count;
+    });
+
     // Format response for frontend
     const formattedMatches = potentialMatches.map(user => ({
       id: user._id.toString(),
@@ -291,6 +322,7 @@ exports.discover = async (req, res) => {
       travelStyle: user.travelStyle || '',
       languages: user.languages || [],
       upcomingTrips: user.upcomingTrips || [],
+      totalConnections: connectionMap[user._id.toString()] || 0,
       // Include match scores for frontend analytics
       matchScore: {
         total: Math.round((user.finalScore || 0) * 100) / 100,
@@ -782,6 +814,41 @@ exports.getMatches = async (req, res) => {
     .populate('user2', '-password')
     .sort({ matchedAt: -1 });
 
+    // Get connection counts for all matched users
+    const userIds = matches.map(match => {
+      return match.user1._id.toString() === currentUserId 
+        ? match.user2._id 
+        : match.user1._id;
+    });
+
+    const connectionCounts = await Match.aggregate([
+      {
+        $match: {
+          $or: [
+            { user1: { $in: userIds }, matched: true },
+            { user2: { $in: userIds }, matched: true }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ['$user1', userIds] },
+              '$user1',
+              '$user2'
+            ]
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const connectionMap = {};
+    connectionCounts.forEach(item => {
+      connectionMap[item._id.toString()] = item.count;
+    });
+
     // Format matches to return the other user
     const formattedMatches = matches.map(match => {
       const otherUser = match.user1._id.toString() === currentUserId 
@@ -790,7 +857,10 @@ exports.getMatches = async (req, res) => {
       
       return {
         matchId: match._id,
-        user: otherUser,
+        user: {
+          ...otherUser.toObject(),
+          totalConnections: connectionMap[otherUser._id.toString()] || 0
+        },
         matchedAt: match.matchedAt
       };
     });
@@ -833,6 +903,41 @@ exports.getLikes = async (req, res) => {
     .populate('user1', '-password')
     .populate('user2', '-password');
 
+    // Get connection counts for all users who liked current user
+    const userIds = matches.map(match => {
+      return match.user1._id.toString() === currentUserId 
+        ? match.user2._id 
+        : match.user1._id;
+    });
+
+    const connectionCounts = await Match.aggregate([
+      {
+        $match: {
+          $or: [
+            { user1: { $in: userIds }, matched: true },
+            { user2: { $in: userIds }, matched: true }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ['$user1', userIds] },
+              '$user1',
+              '$user2'
+            ]
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const connectionMap = {};
+    connectionCounts.forEach(item => {
+      connectionMap[item._id.toString()] = item.count;
+    });
+
     // Format to return users who liked current user
     const likes = matches.map(match => {
       const otherUser = match.user1._id.toString() === currentUserId 
@@ -840,7 +945,10 @@ exports.getLikes = async (req, res) => {
         : match.user1;
       
       return {
-        user: otherUser,
+        user: {
+          ...otherUser.toObject(),
+          totalConnections: connectionMap[otherUser._id.toString()] || 0
+        },
         likedAt: match.createdAt
       };
     });
