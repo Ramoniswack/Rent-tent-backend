@@ -18,6 +18,7 @@ const gearRentalRoutes = require('./routes/gearRentalRoutes');
 const matchRoutes = require('./routes/matchRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const callRoutes = require('./routes/callRoutes');
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use('/api/gear', gearRentalRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/calls', callRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

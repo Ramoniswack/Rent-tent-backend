@@ -9,9 +9,6 @@ router.use(authMiddleware);
 // Get Cloudinary signature for secure uploads
 router.get('/cloudinary-sign', messageController.getCloudinarySignature);
 
-// Get WebRTC configuration with TURN server credentials
-router.get('/webrtc-config', messageController.getWebRTCConfig);
-
 // Get all matches
 router.get('/matches', messageController.getMatches);
 
