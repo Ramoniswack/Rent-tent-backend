@@ -3,10 +3,17 @@ const Match = require('../models/Match');
 const User = require('../models/User');
 const notificationService = require('../services/notificationService');
 
-// Get all matches for the current user
+// Get all matches for the current user (includes both matched users and mutual connections)
 exports.getMatches = async (req, res) => {
   try {
     const userId = req.userId;
+
+    // Get current user with followers/following
+    const currentUser = await User.findById(userId).select('followers following').lean();
+    
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     // Find all matches where user is involved and matched is true
     const matches = await Match.find({
@@ -21,6 +28,36 @@ exports.getMatches = async (req, res) => {
     .lean();
 
     console.log(`Found ${matches.length} matches for user ${userId}`);
+
+    // Find mutual connections (users who follow each other)
+    const mutualConnectionIds = [];
+    if (currentUser.following && currentUser.following.length > 0) {
+      for (const followingId of currentUser.following) {
+        // Check if this user also follows back
+        const otherUser = await User.findById(followingId).select('following').lean();
+        if (otherUser && otherUser.following && otherUser.following.some(id => id.toString() === userId)) {
+          mutualConnectionIds.push(followingId.toString());
+        }
+      }
+    }
+
+    console.log(`Found ${mutualConnectionIds.length} mutual connections for user ${userId}`);
+
+    // Get matched user IDs to avoid duplicates
+    const matchedUserIds = matches.map(match => {
+      const otherUser = match.user1._id.toString() === userId ? match.user2 : match.user1;
+      return otherUser._id.toString();
+    });
+
+    // Filter out mutual connections that are already matched
+    const uniqueMutualConnectionIds = mutualConnectionIds.filter(id => !matchedUserIds.includes(id));
+
+    // Fetch mutual connection users
+    const mutualConnectionUsers = await User.find({
+      _id: { $in: uniqueMutualConnectionIds }
+    }).select('name email profilePicture username').lean();
+
+    console.log(`Found ${mutualConnectionUsers.length} unique mutual connection users`);
 
     // For each match, get the other user and last message
     const matchesWithDetails = await Promise.all(
@@ -65,7 +102,8 @@ exports.getMatches = async (req, res) => {
             online: false,
             isPinned: userSettings.isPinned || false,
             isMuted: userSettings.isMuted || false,
-            isBlocked: userSettings.isBlocked || false
+            isBlocked: userSettings.isBlocked || false,
+            source: 'match'
           };
         } catch (err) {
           console.error('Error processing match:', err);
@@ -74,8 +112,52 @@ exports.getMatches = async (req, res) => {
       })
     );
 
+    // Process mutual connections
+    const connectionsWithDetails = await Promise.all(
+      mutualConnectionUsers.map(async (otherUser) => {
+        try {
+          // Get last message between these users
+          const lastMessage = await Message.findOne({
+            $or: [
+              { sender: userId, receiver: otherUser._id },
+              { sender: otherUser._id, receiver: userId }
+            ]
+          }).sort({ createdAt: -1 }).lean();
+
+          // Count unread messages from other user
+          const unreadCount = await Message.countDocuments({
+            sender: otherUser._id,
+            receiver: userId,
+            read: false
+          });
+
+          return {
+            id: otherUser._id,
+            name: otherUser.name,
+            username: otherUser.username,
+            profilePicture: otherUser.profilePicture,
+            imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
+            lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation',
+            timestamp: lastMessage ? lastMessage.createdAt : new Date(),
+            unread: unreadCount,
+            online: false,
+            isPinned: false,
+            isMuted: false,
+            isBlocked: false,
+            source: 'connection'
+          };
+        } catch (err) {
+          console.error('Error processing connection:', err);
+          return null;
+        }
+      })
+    );
+
+    // Combine matches and connections
+    const allConversations = [...matchesWithDetails, ...connectionsWithDetails];
+
     // Filter out null values and sort by pinned first, then most recent message
-    const validMatches = matchesWithDetails.filter(m => m !== null);
+    const validMatches = allConversations.filter(m => m !== null);
     validMatches.sort((a, b) => {
       // Pinned conversations first
       if (a.isPinned && !b.isPinned) return -1;
@@ -97,7 +179,7 @@ exports.getMessages = async (req, res) => {
     const userId = req.userId;
     const { otherUserId } = req.params;
 
-    // Verify match exists
+    // Verify match exists OR mutual connection exists
     const [user1, user2] = [userId, otherUserId].sort();
     const match = await Match.findOne({
       user1,
@@ -105,8 +187,24 @@ exports.getMessages = async (req, res) => {
       matched: true
     });
 
-    if (!match) {
-      return res.status(403).json({ error: 'You can only message users you have matched with' });
+    // If not matched, check for mutual connection
+    let hasPermission = !!match;
+    
+    if (!hasPermission) {
+      // Check if users have mutual connection (both follow each other)
+      const currentUser = await User.findById(userId).select('following').lean();
+      const otherUser = await User.findById(otherUserId).select('following').lean();
+      
+      if (currentUser && otherUser) {
+        const currentUserFollowsOther = currentUser.following && currentUser.following.some(id => id.toString() === otherUserId);
+        const otherUserFollowsCurrent = otherUser.following && otherUser.following.some(id => id.toString() === userId);
+        
+        hasPermission = currentUserFollowsOther && otherUserFollowsCurrent;
+      }
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'Access denied. You do not have permission.' });
     }
 
     // Get all messages between these users with proper sequencing
@@ -243,7 +341,7 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    // Verify match exists
+    // Verify match exists OR mutual connection exists
     const [user1, user2] = [userId, receiverId].sort();
     const match = await Match.findOne({
       user1,
@@ -251,8 +349,24 @@ exports.sendMessage = async (req, res) => {
       matched: true
     });
 
-    if (!match) {
-      return res.status(403).json({ error: 'You can only message users you have matched with' });
+    // If not matched, check for mutual connection
+    let hasPermission = !!match;
+    
+    if (!hasPermission) {
+      // Check if users have mutual connection (both follow each other)
+      const currentUser = await User.findById(userId).select('following').lean();
+      const otherUser = await User.findById(receiverId).select('following').lean();
+      
+      if (currentUser && otherUser) {
+        const currentUserFollowsOther = currentUser.following && currentUser.following.some(id => id.toString() === receiverId);
+        const otherUserFollowsCurrent = otherUser.following && otherUser.following.some(id => id.toString() === userId);
+        
+        hasPermission = currentUserFollowsOther && otherUserFollowsCurrent;
+      }
+    }
+
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'Access denied. You do not have permission.' });
     }
 
     // Verify replyTo message exists if provided

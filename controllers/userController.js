@@ -78,10 +78,26 @@ exports.getAllUsers = async (req, res) => {
       profilePicture: { $exists: true, $ne: null, $ne: '' },
       name: { $exists: true, $ne: null, $ne: '' }
     })
-    .select('-password -email')
+    .select('-password')
     .limit(50);
     
     res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET /api/user/profile/:username - Get user profile by username
+exports.getUserByUsername = async (req, res) => {
+  try {
+    const { username } = req.params;
+    const user = await User.findOne({ username }).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(user);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -92,6 +108,7 @@ exports.getUserStats = async (req, res) => {
   try {
     const Trip = require('../models/Trip');
     const GearRental = require('../models/GearRental');
+    const Match = require('../models/Match');
     
     // Get total trips count
     const totalTrips = await Trip.countDocuments({ user: req.userId });
@@ -113,6 +130,14 @@ exports.getUserStats = async (req, res) => {
     
     const ownedGear = await GearRental.countDocuments({ 
       owner: req.userId 
+    });
+    
+    // Get total connections (mutual matches)
+    const totalConnections = await Match.countDocuments({
+      $or: [
+        { user1: req.userId, matched: true },
+        { user2: req.userId, matched: true }
+      ]
     });
     
     // Calculate trips this year
@@ -141,11 +166,116 @@ exports.getUserStats = async (req, res) => {
       totalExpenses: Math.round(totalExpenses * 100) / 100, // Round to 2 decimal places
       gearRented: rentedGear,
       gearOwned: ownedGear,
+      totalConnections,
       tripsThisYear,
       percentageIncrease
     });
   } catch (error) {
     console.error('Error fetching user stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+
+// POST /api/user/follow/:userId - Follow a user
+exports.followUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.userId;
+
+    if (userId === currentUserId) {
+      return res.status(400).json({ error: 'You cannot follow yourself' });
+    }
+
+    const userToFollow = await User.findById(userId);
+    const currentUser = await User.findById(currentUserId);
+
+    if (!userToFollow || !currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if already following
+    if (currentUser.following.includes(userId)) {
+      return res.status(400).json({ error: 'Already following this user' });
+    }
+
+    // Add to following and followers
+    currentUser.following.push(userId);
+    userToFollow.followers.push(currentUserId);
+
+    await currentUser.save();
+    await userToFollow.save();
+
+    res.json({ 
+      message: 'Successfully followed user',
+      isFollowing: true,
+      followerCount: userToFollow.followers.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// DELETE /api/user/unfollow/:userId - Unfollow a user
+exports.unfollowUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.userId;
+
+    if (userId === currentUserId) {
+      return res.status(400).json({ error: 'You cannot unfollow yourself' });
+    }
+
+    const userToUnfollow = await User.findById(userId);
+    const currentUser = await User.findById(currentUserId);
+
+    if (!userToUnfollow || !currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if not following
+    if (!currentUser.following.includes(userId)) {
+      return res.status(400).json({ error: 'Not following this user' });
+    }
+
+    // Remove from following and followers
+    currentUser.following = currentUser.following.filter(id => id.toString() !== userId);
+    userToUnfollow.followers = userToUnfollow.followers.filter(id => id.toString() !== currentUserId);
+
+    await currentUser.save();
+    await userToUnfollow.save();
+
+    res.json({ 
+      message: 'Successfully unfollowed user',
+      isFollowing: false,
+      followerCount: userToUnfollow.followers.length
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET /api/user/follow-status/:userId - Check if following a user
+exports.getFollowStatus = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.userId;
+
+    const currentUser = await User.findById(currentUserId);
+    const targetUser = await User.findById(userId);
+
+    if (!currentUser || !targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const isFollowing = currentUser.following.includes(userId);
+    const followerCount = targetUser.followers.length;
+
+    res.json({ 
+      isFollowing,
+      followerCount
+    });
+  } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };

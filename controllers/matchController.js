@@ -33,9 +33,9 @@ exports.discover = async (req, res) => {
     // Extract user preferences with defaults
     const userPreferences = currentUser.matchPreferences || {};
     const ageRange = userPreferences.ageRange || [18, 60];
-    const preferredGenders = userPreferences.genders || [];
-    const preferredTravelStyles = userPreferences.travelStyles || [];
-    const preferredInterests = userPreferences.interests || [];
+    const preferredGenders = Array.isArray(userPreferences.genders) ? userPreferences.genders : [];
+    const preferredTravelStyles = Array.isArray(userPreferences.travelStyles) ? userPreferences.travelStyles : [];
+    const preferredInterests = Array.isArray(userPreferences.interests) ? userPreferences.interests : [];
 
     // Get all users current user has already interacted with
     const existingMatches = await Match.find({
@@ -133,7 +133,7 @@ exports.discover = async (req, res) => {
           // Travel Style Score: 1.5x weight for matching travel styles
           travelStyleScore: {
             $cond: {
-              if: { $gt: [{ $size: preferredTravelStyles }, 0] }, // Only if user has style preferences
+              if: preferredTravelStyles.length > 0, // Check JavaScript array length
               then: {
                 $multiply: [
                   1.5, // 1.5x weight
@@ -165,7 +165,7 @@ exports.discover = async (req, res) => {
           // Interest Score: 1.0x weight for matching interests
           interestScore: {
             $cond: {
-              if: { $gt: [{ $size: preferredInterests }, 0] }, // Only if user has interest preferences
+              if: preferredInterests.length > 0, // Check JavaScript array length
               then: {
                 $size: {
                   $ifNull: [
@@ -207,12 +207,7 @@ exports.discover = async (req, res) => {
           // Add a randomization factor for users with no preferences or equal scores
           randomFactor: {
             $cond: {
-              if: {
-                $and: [
-                  { $eq: [{ $size: preferredTravelStyles }, 0] },
-                  { $eq: [{ $size: preferredInterests }, 0] }
-                ]
-              },
+              if: (preferredTravelStyles.length === 0 && preferredInterests.length === 0), // Check JavaScript arrays
               then: { $rand: {} }, // Full randomization if no preferences
               else: { $multiply: [{ $rand: {} }, 0.1] } // Small random factor for tie-breaking
             }
@@ -879,6 +874,32 @@ exports.getInteractedUsers = async (req, res) => {
     res.json({ interactedUserIds });
   } catch (error) {
     console.error('Get interacted users error:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// DELETE /api/matches/reset - Reset all interactions for current user (clear match history)
+exports.resetInteractions = async (req, res) => {
+  try {
+    const currentUserId = req.userId;
+
+    // Delete all match records where current user is involved
+    const result = await Match.deleteMany({
+      $or: [
+        { user1: currentUserId },
+        { user2: currentUserId }
+      ]
+    });
+
+    console.log(`Reset interactions for user ${currentUserId}: deleted ${result.deletedCount} matches`);
+
+    res.json({ 
+      success: true,
+      message: 'Match history cleared successfully',
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Reset interactions error:', error);
     res.status(500).json({ error: error.message });
   }
 };

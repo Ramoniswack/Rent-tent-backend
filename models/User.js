@@ -125,7 +125,15 @@ const userSchema = new mongoose.Schema({
     bookings: { type: Boolean, default: true },
     matches: { type: Boolean, default: true },
     tripUpdates: { type: Boolean, default: true }
-  }
+  },
+  followers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  following: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }]
 }, {
   timestamps: true
 });

@@ -21,4 +21,7 @@ router.get('/likes', matchController.getLikes);
 router.get('/interacted', matchController.getInteractedUsers);
 router.get('/check/:userId', matchController.checkMatch);
 
+// Reset interactions (clear match history)
+router.delete('/reset', matchController.resetInteractions);
+
 module.exports = router;
