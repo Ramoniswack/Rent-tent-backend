@@ -103,6 +103,42 @@ exports.getUserByUsername = async (req, res) => {
   }
 };
 
+// GET /api/user/check-username/:username - Check if username is available
+exports.checkUsernameAvailability = async (req, res) => {
+  try {
+    const { username } = req.params;
+    
+    // Validate username format
+    if (!username || username.length < 3) {
+      return res.json({ available: false, message: 'Username must be at least 3 characters' });
+    }
+    
+    if (username.length > 20) {
+      return res.json({ available: false, message: 'Username must be less than 20 characters' });
+    }
+    
+    if (!/^[a-z0-9_]+$/.test(username)) {
+      return res.json({ available: false, message: 'Username can only contain lowercase letters, numbers, and underscores' });
+    }
+    
+    // Check if username exists
+    const existingUser = await User.findOne({ username });
+    
+    // If checking own username (authenticated user), allow it
+    if (req.userId && existingUser && existingUser._id.toString() === req.userId) {
+      return res.json({ available: true, message: 'This is your current username' });
+    }
+    
+    if (existingUser) {
+      return res.json({ available: false, message: 'Username is already taken' });
+    }
+    
+    res.json({ available: true, message: 'Username is available' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // GET /api/user/stats - Get user statistics
 exports.getUserStats = async (req, res) => {
   try {

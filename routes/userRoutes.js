@@ -5,6 +5,7 @@ const {
   updateProfile, 
   getAllUsers,
   getUserByUsername,
+  checkUsernameAvailability,
   getUserStats,
   followUser,
   unfollowUser,
@@ -16,6 +17,7 @@ router.get('/profile', auth, getProfile);
 router.patch('/profile', auth, updateProfile);
 router.get('/all', auth, getAllUsers);
 router.get('/profile/:username', auth, getUserByUsername);
+router.get('/check-username/:username', checkUsernameAvailability); // Public endpoint for registration
 router.get('/stats', auth, getUserStats);
 router.post('/follow/:userId', auth, followUser);
 router.delete('/unfollow/:userId', auth, unfollowUser);

@@ -6,6 +6,38 @@ const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
+// Generate unique username from name
+const generateUsername = async (name) => {
+  // Convert name to lowercase and remove special characters
+  let baseUsername = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .substring(0, 15); // Limit to 15 characters
+  
+  if (!baseUsername) {
+    baseUsername = 'user';
+  }
+  
+  // Check if username exists
+  let username = baseUsername;
+  let counter = 1;
+  
+  while (await User.findOne({ username })) {
+    // Add random number if username exists
+    const randomNum = Math.floor(Math.random() * 9999);
+    username = `${baseUsername}${randomNum}`;
+    counter++;
+    
+    // Prevent infinite loop
+    if (counter > 10) {
+      username = `${baseUsername}${Date.now()}`;
+      break;
+    }
+  }
+  
+  return username;
+};
+
 // Register new user
 exports.register = async (req, res) => {
   try {
@@ -17,15 +49,18 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: 'Email already registered' });
     }
 
+    // Generate unique username from name
+    const username = await generateUsername(name);
+
     // Create new user
-    const user = new User({ email, password, name });
+    const user = new User({ email, password, name, username });
     await user.save();
 
     const token = generateToken(user._id);
     res.status(201).json({
       message: 'User registered successfully',
       token,
-      user: { id: user._id, email: user.email, name: user.name }
+      user: { id: user._id, email: user.email, name: user.name, username: user.username }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
