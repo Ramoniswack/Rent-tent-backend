@@ -537,11 +537,24 @@ exports.likeUser = async (req, res) => {
     const isMatch = match.checkMatch();
     await match.save();
 
-    res.json({
+    // If it's a match, include the matched user's details
+    const response = {
       liked: true,
       matched: isMatch,
       match: isMatch ? match : null
-    });
+    };
+
+    if (isMatch) {
+      response.matchedUser = {
+        id: likedUser._id.toString(),
+        name: likedUser.name,
+        username: likedUser.username,
+        profilePicture: likedUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(likedUser.name)}&background=random`,
+        bio: likedUser.bio || ''
+      };
+    }
+
+    res.json(response);
   } catch (error) {
     console.error('Like user error:', error);
     res.status(500).json({ error: error.message });
