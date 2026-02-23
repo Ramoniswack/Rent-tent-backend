@@ -145,5 +145,35 @@ router.post('/login', authController.login);
  */
 router.post('/google', googleAuthController.googleAuth);
 
+/**
+ * @swagger
+ * /auth/cloudinary-sign:
+ *   get:
+ *     summary: Get Cloudinary signature for public uploads (registration)
+ *     tags: [Authentication]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Cloudinary signature generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 signature:
+ *                   type: string
+ *                 timestamp:
+ *                   type: number
+ *                 cloudName:
+ *                   type: string
+ *                 apiKey:
+ *                   type: string
+ *                 uploadParams:
+ *                   type: object
+ *       500:
+ *         description: Failed to generate signature
+ */
+router.get('/cloudinary-sign', authController.getPublicCloudinarySignature);
+
 module.exports = router;
 

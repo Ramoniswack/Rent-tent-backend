@@ -59,3 +59,49 @@ exports.login = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// Generate Cloudinary signature for public uploads (registration, etc.)
+exports.getPublicCloudinarySignature = async (req, res) => {
+  try {
+    const crypto = require('crypto');
+    
+    // Generate timestamp
+    const timestamp = Math.round(Date.now() / 1000);
+    
+    // Define upload parameters for signing
+    // Note: Only certain parameters should be included in the signature
+    // resource_type and max_file_size are NOT signed, they're just upload constraints
+    const paramsToSign = {
+      timestamp: timestamp,
+      folder: 'profiles',
+      tags: 'profile_image'
+    };
+    
+    // Create string to sign (alphabetically sorted parameters)
+    const stringToSign = Object.keys(paramsToSign)
+      .sort()
+      .map(key => `${key}=${paramsToSign[key]}`)
+      .join('&') + process.env.CLOUDINARY_API_SECRET;
+    
+    // Generate signature using SHA-1 (Cloudinary's default)
+    const signature = crypto
+      .createHash('sha1')
+      .update(stringToSign)
+      .digest('hex');
+    
+    // Return signature and upload parameters
+    res.json({
+      signature,
+      timestamp,
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY,
+      uploadParams: {
+        folder: paramsToSign.folder,
+        tags: paramsToSign.tags
+      }
+    });
+  } catch (error) {
+    console.error('Error generating Cloudinary signature:', error);
+    res.status(500).json({ error: 'Failed to generate upload signature' });
+  }
+};

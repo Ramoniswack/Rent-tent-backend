@@ -1105,28 +1105,24 @@ exports.getCloudinarySignature = async (req, res) => {
     // Generate timestamp
     const timestamp = Math.round(Date.now() / 1000);
     
-    // Define upload parameters
-    const uploadParams = {
+    // Define upload parameters for signing
+    // Note: Only certain parameters should be included in the signature
+    const paramsToSign = {
       timestamp: timestamp,
-      folder: 'messages', // Organize uploads in messages folder
-      resource_type: 'image',
-      allowed_formats: 'jpg,jpeg,png,gif,webp',
-      max_file_size: 10485760, // 10MB limit
-      context: `user_id=${userId}`, // Add user context for tracking
-      tags: 'message_image' // Tag for easy management
+      folder: 'messages',
+      tags: 'message_image',
+      context: `user_id=${userId}`
     };
     
     // Create string to sign (alphabetically sorted parameters)
-    const paramsToSign = Object.keys(uploadParams)
+    const stringToSign = Object.keys(paramsToSign)
       .sort()
-      .map(key => `${key}=${uploadParams[key]}`)
-      .join('&');
+      .map(key => `${key}=${paramsToSign[key]}`)
+      .join('&') + process.env.CLOUDINARY_API_SECRET;
     
-    const stringToSign = `${paramsToSign}${process.env.CLOUDINARY_API_SECRET}`;
-    
-    // Generate signature
+    // Generate signature using SHA-1 (Cloudinary's default)
     const signature = crypto
-      .createHash('sha256')
+      .createHash('sha1')
       .update(stringToSign)
       .digest('hex');
     
@@ -1137,12 +1133,9 @@ exports.getCloudinarySignature = async (req, res) => {
       cloudName: process.env.CLOUDINARY_CLOUD_NAME,
       apiKey: process.env.CLOUDINARY_API_KEY,
       uploadParams: {
-        folder: uploadParams.folder,
-        resource_type: uploadParams.resource_type,
-        allowed_formats: uploadParams.allowed_formats,
-        max_file_size: uploadParams.max_file_size,
-        context: uploadParams.context,
-        tags: uploadParams.tags
+        folder: paramsToSign.folder,
+        tags: paramsToSign.tags,
+        context: paramsToSign.context
       }
     });
   } catch (error) {
