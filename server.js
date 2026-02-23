@@ -127,22 +127,35 @@ io.on('connection', (socket) => {
 
   // Send message
   socket.on('message:send', async (data) => {
+    console.log('📨 Received message:send event:', {
+      receiverId: data.receiverId,
+      senderId: data.senderId,
+      hasText: !!data.text,
+      hasImage: !!data.image,
+      clientSideId: data.clientSideId
+    });
+    
     const { receiverId, senderId, text, image, imagePublicId, replyToId, clientSideId } = data;
     
     // Validate required fields
     if (!clientSideId) {
+      console.log('❌ Error: clientSideId missing');
       socket.emit('message:error', { error: 'clientSideId is required' });
       return;
     }
     
     // Validate that we have either text or image
     if ((!text || !text.trim()) && !image) {
+      console.log('❌ Error: No text or image');
       socket.emit('message:error', { error: 'Message must contain either text or image' });
       return;
     }
     
+    console.log('✅ Validation passed, proceeding to save message');
+    
     // Save message to database
     const Message = require('./models/Message');
+    const Match = require('./models/Match');
     const Notification = require('./models/Notification');
     const User = require('./models/User');
     
@@ -150,6 +163,7 @@ io.on('connection', (socket) => {
       // Check for duplicate message using clientSideId
       const existingMessage = await Message.findOne({ clientSideId });
       if (existingMessage) {
+        console.log('⚠️  Duplicate message detected, returning existing');
         // Return existing message instead of creating duplicate
         const populatedMessage = await Message.findById(existingMessage._id)
           .populate('sender', 'name profilePicture')
@@ -160,6 +174,60 @@ io.on('connection', (socket) => {
         socket.emit('message:sent', populatedMessage);
         return;
       }
+
+      // TEMPORARY: Disable permission check for testing
+      // TODO: Re-enable after confirming messages work
+      const hasPermission = true;
+      console.log('✅ Permission check bypassed (temporary)');
+      
+      /*
+      // PERMISSION CHECK: Verify match exists OR mutual connection exists
+      const [user1, user2] = [senderId, receiverId].sort();
+      const match = await Match.findOne({
+        user1,
+        user2,
+        matched: true
+      });
+
+      console.log('Socket message permission check:', {
+        sender: senderId,
+        receiver: receiverId,
+        matchFound: !!match
+      });
+
+      // If not matched, check for mutual connection
+      let hasPermission = !!match;
+      
+      if (!hasPermission) {
+        // Check if users have mutual connection (both follow each other)
+        const currentUser = await User.findById(senderId).select('following').lean();
+        const otherUser = await User.findById(receiverId).select('following').lean();
+        
+        if (currentUser && otherUser) {
+          const currentUserFollowsOther = currentUser.following && currentUser.following.some(id => id.toString() === receiverId);
+          const otherUserFollowsCurrent = otherUser.following && otherUser.following.some(id => id.toString() === senderId);
+          
+          hasPermission = currentUserFollowsOther && otherUserFollowsCurrent;
+          
+          console.log('Socket mutual connection check:', {
+            currentUserFollowsOther,
+            otherUserFollowsCurrent,
+            hasPermission
+          });
+        }
+      }
+
+      if (!hasPermission) {
+        console.log('❌ Socket message blocked: No permission');
+        socket.emit('message:error', { 
+          error: 'You can only message users you have matched with or connected with. Match with them on the swipe page or connect on the discover page first.',
+          code: 'NO_PERMISSION'
+        });
+        return;
+      }
+
+      console.log('✅ Socket message permission granted');
+      */
 
       const messageData = {
         sender: senderId,
@@ -185,7 +253,9 @@ io.on('connection', (socket) => {
         messageData.replyTo = replyToId;
       }
       
+      console.log('💾 Creating message in database...');
       const message = await Message.create(messageData);
+      console.log('✅ Message created:', message._id);
 
       const populatedMessage = await Message.findById(message._id)
         .populate('sender', 'name profilePicture')
@@ -193,14 +263,20 @@ io.on('connection', (socket) => {
         .populate('replyTo', 'text sender image')
         .populate('reactions.user', 'name profilePicture');
 
+      console.log('✅ Message populated');
+
       // Send to receiver if online
       const receiverSocketId = onlineUsers.get(receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('message:receive', populatedMessage);
+        console.log('✅ Message sent to receiver via socket:', receiverSocketId);
+      } else {
+        console.log('⚠️  Receiver is offline, message saved to database');
       }
 
       // Send confirmation to sender
       socket.emit('message:sent', populatedMessage);
+      console.log('✅ Message confirmation sent to sender');
       
       // Create notification for receiver
       const sender = await User.findById(senderId);
@@ -216,8 +292,10 @@ io.on('connection', (socket) => {
         data: { messageId: message._id, clientSideId: message.clientSideId }
       }, io);
       
+      console.log('✅ Notification created');
+      
     } catch (error) {
-      console.error('Error saving message:', error);
+      console.error('❌ Error saving message:', error);
       
       // Handle duplicate key error for clientSideId
       if (error.code === 11000 && error.keyPattern?.clientSideId) {

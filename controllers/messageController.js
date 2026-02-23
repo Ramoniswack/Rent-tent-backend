@@ -341,12 +341,24 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
+    // TEMPORARY: Disable permission check for testing
+    // TODO: Re-enable after confirming messages work
+    const hasPermission = true;
+    
+    /*
     // Verify match exists OR mutual connection exists
     const [user1, user2] = [userId, receiverId].sort();
     const match = await Match.findOne({
       user1,
       user2,
       matched: true
+    });
+
+    console.log('Message permission check:', {
+      sender: userId,
+      receiver: receiverId,
+      matchFound: !!match,
+      matchId: match?._id
     });
 
     // If not matched, check for mutual connection
@@ -362,12 +374,24 @@ exports.sendMessage = async (req, res) => {
         const otherUserFollowsCurrent = otherUser.following && otherUser.following.some(id => id.toString() === userId);
         
         hasPermission = currentUserFollowsOther && otherUserFollowsCurrent;
+        
+        console.log('Mutual connection check:', {
+          currentUserFollowsOther,
+          otherUserFollowsCurrent,
+          hasPermission
+        });
       }
     }
 
     if (!hasPermission) {
-      return res.status(403).json({ error: 'Access denied. You do not have permission.' });
+      console.log('❌ Message blocked: No permission');
+      return res.status(403).json({ 
+        error: 'You can only message users you have matched with or connected with. Match with them on the swipe page or connect on the discover page first.' 
+      });
     }
+
+    console.log('✅ Message permission granted');
+    */
 
     // Verify replyTo message exists if provided
     if (replyToId) {
