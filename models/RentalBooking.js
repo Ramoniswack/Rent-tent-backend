@@ -41,6 +41,18 @@ const rentalBookingSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'active', 'completed', 'cancelled'],
     default: 'pending'
   },
+  statusHistory: [{
+    status: {
+      type: String,
+      enum: ['pending', 'confirmed', 'picked_up', 'in_use', 'returned', 'inspected', 'completed', 'cancelled'],
+      required: true
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    note: String
+  }],
   pickupLocation: {
     type: String,
     required: true

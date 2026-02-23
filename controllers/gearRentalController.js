@@ -308,7 +308,12 @@ exports.createBooking = async (req, res) => {
       totalPrice,
       deposit: gear.deposit,
       pickupLocation,
-      notes: notes || ''
+      notes: notes || '',
+      statusHistory: [{
+        status: 'pending',
+        timestamp: new Date(),
+        note: 'Booking created'
+      }]
     });
 
     const populatedBooking = await RentalBooking.findById(booking._id)
@@ -381,10 +386,20 @@ exports.updateBookingStatus = async (req, res) => {
     }
 
     // Validate status transitions
-    const validStatuses = ['pending', 'confirmed', 'active', 'completed', 'cancelled'];
+    const validStatuses = ['pending', 'confirmed', 'active', 'picked_up', 'in_use', 'returned', 'inspected', 'completed', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
+
+    // Add to status history
+    if (!booking.statusHistory) {
+      booking.statusHistory = [];
+    }
+    booking.statusHistory.push({
+      status: status,
+      timestamp: new Date(),
+      note: `Status changed to ${status}`
+    });
 
     booking.status = status;
     await booking.save();
