@@ -58,8 +58,7 @@ const messageSchema = new mongoose.Schema({
   // Client-side nonce for preventing duplicate messages during retries
   clientSideId: {
     type: String,
-    required: true,
-    index: true
+    required: true
   },
   // Sequence number for maintaining exact order within same timestamp
   sequenceNumber: {
