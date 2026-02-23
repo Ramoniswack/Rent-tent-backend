@@ -313,8 +313,8 @@ exports.createBooking = async (req, res) => {
 
     const populatedBooking = await RentalBooking.findById(booking._id)
       .populate('gear')
-      .populate('renter', 'name email profilePicture')
-      .populate('owner', 'name email profilePicture');
+      .populate('renter', 'name email profilePicture username')
+      .populate('owner', 'name email profilePicture username');
 
     res.status(201).json(populatedBooking);
   } catch (error) {
@@ -330,7 +330,8 @@ exports.getMyBookings = async (req, res) => {
 
     const bookings = await RentalBooking.find({ renter: userId })
       .populate('gear')
-      .populate('owner', 'name email profilePicture')
+      .populate('renter', 'name email profilePicture username')
+      .populate('owner', 'name email profilePicture username')
       .sort({ createdAt: -1 });
 
     res.json(bookings);
@@ -347,7 +348,8 @@ exports.getGearBookings = async (req, res) => {
 
     const bookings = await RentalBooking.find({ owner: userId })
       .populate('gear')
-      .populate('renter', 'name email profilePicture')
+      .populate('renter', 'name email profilePicture username')
+      .populate('owner', 'name email profilePicture username')
       .sort({ createdAt: -1 });
 
     res.json(bookings);
@@ -364,15 +366,24 @@ exports.updateBookingStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    const booking = await RentalBooking.findById(id);
+    const booking = await RentalBooking.findById(id).populate('gear');
 
     if (!booking) {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    // Only owner can confirm/cancel, renter can cancel
-    if (booking.owner.toString() !== userId && booking.renter.toString() !== userId) {
-      return res.status(403).json({ error: 'Unauthorized' });
+    // Only the gear owner (product lister) can update status
+    // Check both booking.owner and gear.owner to ensure it's the actual product owner
+    const isGearOwner = booking.gear.owner.toString() === userId;
+    
+    if (!isGearOwner) {
+      return res.status(403).json({ error: 'Only the gear owner can update booking status' });
+    }
+
+    // Validate status transitions
+    const validStatuses = ['pending', 'confirmed', 'active', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
     }
 
     booking.status = status;
@@ -380,15 +391,15 @@ exports.updateBookingStatus = async (req, res) => {
 
     // Update gear total rentals if completed
     if (status === 'completed') {
-      await GearRental.findByIdAndUpdate(booking.gear, {
+      await GearRental.findByIdAndUpdate(booking.gear._id, {
         $inc: { totalRentals: 1 }
       });
     }
 
     const populatedBooking = await RentalBooking.findById(booking._id)
       .populate('gear')
-      .populate('renter', 'name email profilePicture')
-      .populate('owner', 'name email profilePicture');
+      .populate('renter', 'name email profilePicture username')
+      .populate('owner', 'name email profilePicture username');
 
     res.json(populatedBooking);
   } catch (error) {
