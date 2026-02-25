@@ -17,7 +17,12 @@ exports.getAllPages = async (req, res) => {
 exports.getPageBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
-    const page = await Page.findOne({ slug, isPublished: true });
+    
+    // If user is authenticated and admin, return page regardless of publish status
+    const isAdmin = req.user && req.user.isAdmin;
+    const query = isAdmin ? { slug } : { slug, isPublished: true };
+    
+    const page = await Page.findOne(query);
     
     if (!page) {
       return res.status(404).json({ error: 'Page not found' });

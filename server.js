@@ -20,6 +20,9 @@ const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const callRoutes = require('./routes/callRoutes');
 const pageRoutes = require('./routes/pageRoutes');
+const profileFieldOptionsRoutes = require('./routes/profileFieldOptionsRoutes');
+const siteSettingsRoutes = require('./routes/siteSettingsRoutes');
+const adminSiteSettingsRoutes = require('./routes/adminSiteSettingsRoutes');
 
 const app = express();
 
@@ -61,6 +64,9 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/calls', callRoutes);
 app.use('/api/pages', pageRoutes);
+app.use('/api/profile-field-options', profileFieldOptionsRoutes);
+app.use('/api/site-settings', siteSettingsRoutes);
+app.use('/api/admin/site-settings', adminSiteSettingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

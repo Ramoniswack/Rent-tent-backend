@@ -13,7 +13,7 @@ const pageSchema = new mongoose.Schema({
     required: true
   },
   content: {
-    type: String,
+    type: mongoose.Schema.Types.Mixed,
     required: true
   },
   metaDescription: {
@@ -50,8 +50,7 @@ const pageSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for faster queries
-pageSchema.index({ slug: 1 });
+// Index for faster queries (slug already indexed via unique: true)
 pageSchema.index({ pageType: 1 });
 
 module.exports = mongoose.model('Page', pageSchema);

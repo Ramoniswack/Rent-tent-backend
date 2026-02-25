@@ -12,7 +12,7 @@ let turnCredentialsCache = {
  */
 async function fetchTurnCredentials() {
   try {
-    const apiKey = process.env.METERED_API_KEY || 'e0f6ba53d9e1f94f34daa0e90f1399c2cccf';
+    const apiKey = process.env.METERED_API_KEY ;
     const apiUrl = 'https://noamdnotes.metered.live/api/v1/turn/credentials';
     
     console.log('Fetching fresh TURN credentials from Metered.ca...');

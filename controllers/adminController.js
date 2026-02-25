@@ -265,3 +265,85 @@ exports.updateGear = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+
+// PUT /api/admin/pages/about - Update About page content
+exports.updateAboutPage = async (req, res) => {
+  try {
+    const Page = require('../models/Page');
+    const { content } = req.body;
+
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const page = await Page.findOneAndUpdate(
+      { slug: 'about' },
+      { content, updatedAt: new Date(), lastModifiedBy: req.userId },
+      { new: true, runValidators: true }
+    );
+
+    if (!page) {
+      return res.status(404).json({ error: 'About page not found' });
+    }
+
+    res.json({ message: 'About page updated successfully', page });
+  } catch (error) {
+    console.error('Error updating About page:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// PUT /api/admin/pages/contact - Update Contact page content
+exports.updateContactPage = async (req, res) => {
+  try {
+    const Page = require('../models/Page');
+    const { content } = req.body;
+
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const page = await Page.findOneAndUpdate(
+      { slug: 'contact' },
+      { content, updatedAt: new Date(), lastModifiedBy: req.userId },
+      { new: true, runValidators: true }
+    );
+
+    if (!page) {
+      return res.status(404).json({ error: 'Contact page not found' });
+    }
+
+    res.json({ message: 'Contact page updated successfully', page });
+  } catch (error) {
+    console.error('Error updating Contact page:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// PUT /api/admin/pages/home - Update Home page content
+exports.updateHomePage = async (req, res) => {
+  try {
+    const Page = require('../models/Page');
+    const { content } = req.body;
+
+    if (!content) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const page = await Page.findOneAndUpdate(
+      { slug: 'home' },
+      { content, updatedAt: new Date(), lastModifiedBy: req.userId },
+      { new: true, runValidators: true }
+    );
+
+    if (!page) {
+      return res.status(404).json({ error: 'Home page not found' });
+    }
+
+    res.json({ message: 'Home page updated successfully', page });
+  } catch (error) {
+    console.error('Error updating Home page:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

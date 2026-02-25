@@ -31,5 +31,8 @@ router.get('/pages', pageController.getAllPages);
 router.post('/pages', pageController.createPage);
 router.patch('/pages/:id', pageController.updatePage);
 router.delete('/pages/:id', pageController.deletePage);
+router.put('/pages/about', adminController.updateAboutPage);
+router.put('/pages/contact', adminController.updateContactPage);
+router.put('/pages/home', adminController.updateHomePage);
 
 module.exports = router;
