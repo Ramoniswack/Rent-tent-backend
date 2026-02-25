@@ -19,6 +19,7 @@ const matchRoutes = require('./routes/matchRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const callRoutes = require('./routes/callRoutes');
+const pageRoutes = require('./routes/pageRoutes');
 
 const app = express();
 
@@ -59,6 +60,7 @@ app.use('/api/matches', matchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/calls', callRoutes);
+app.use('/api/pages', pageRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -155,7 +157,6 @@ io.on('connection', (socket) => {
     
     // Save message to database
     const Message = require('./models/Message');
-    const Match = require('./models/Match');
     const Notification = require('./models/Notification');
     const User = require('./models/User');
     
@@ -177,7 +178,6 @@ io.on('connection', (socket) => {
 
       // TEMPORARY: Disable permission check for testing
       // TODO: Re-enable after confirming messages work
-      const hasPermission = true;
       console.log('✅ Permission check bypassed (temporary)');
       
       /*
@@ -508,9 +508,8 @@ io.on('connection', (socket) => {
 
   socket.on('call:reject', (data) => {
     const { to, callId } = data;
-    const call = activeCalls.get(callId);
     
-    if (call) {
+    if (callId && activeCalls.has(callId)) {
       // Remove call from active calls
       activeCalls.delete(callId);
       

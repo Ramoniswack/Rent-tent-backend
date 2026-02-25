@@ -3,6 +3,7 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
 const adminController = require('../controllers/adminController');
+const pageController = require('../controllers/pageController');
 
 // All routes require authentication and admin privileges
 router.use(auth);
@@ -24,5 +25,11 @@ router.delete('/trips/:id', adminController.deleteTrip);
 router.get('/gear', adminController.getGear);
 router.patch('/gear/:id', adminController.updateGear);
 router.delete('/gear/:id', adminController.deleteGear);
+
+// Page management
+router.get('/pages', pageController.getAllPages);
+router.post('/pages', pageController.createPage);
+router.patch('/pages/:id', pageController.updatePage);
+router.delete('/pages/:id', pageController.deletePage);
 
 module.exports = router;

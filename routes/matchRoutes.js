@@ -18,6 +18,7 @@ router.post('/pass', matchController.passUser);
 // Get matches and likes
 router.get('/', matchController.getMatches);
 router.get('/likes', matchController.getLikes);
+router.get('/sent', matchController.getSentLikes);
 router.get('/interacted', matchController.getInteractedUsers);
 router.get('/check/:userId', matchController.checkMatch);
 

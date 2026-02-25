@@ -719,11 +719,6 @@ exports.getLikes = async (req, res) => {
     .populate('user2', '-password')
     .sort({ createdAt: -1 });
 
-    // If no matches, return empty array
-    if (!matches || matches.length === 0) {
-      return res.json([]);
-    }
-
     // Get connection counts for all users who liked current user
     const userIds = matches.map(match => {
       return match.user1._id.toString() === currentUserId 
@@ -731,36 +726,33 @@ exports.getLikes = async (req, res) => {
         : match.user1._id;
     });
 
-    // Only run aggregation if we have userIds
-    let connectionMap = {};
-    if (userIds.length > 0) {
-      const connectionCounts = await Match.aggregate([
-        {
-          $match: {
-            $or: [
-              { user1: { $in: userIds }, matched: true },
-              { user2: { $in: userIds }, matched: true }
-            ]
-          }
-        },
-        {
-          $group: {
-            _id: {
-              $cond: [
-                { $in: ['$user1', userIds] },
-                '$user1',
-                '$user2'
-              ]
-            },
-            count: { $sum: 1 }
-          }
+    const connectionCounts = await Match.aggregate([
+      {
+        $match: {
+          $or: [
+            { user1: { $in: userIds }, matched: true },
+            { user2: { $in: userIds }, matched: true }
+          ]
         }
-      ]);
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ['$user1', userIds] },
+              '$user1',
+              '$user2'
+            ]
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-      connectionCounts.forEach(item => {
-        connectionMap[item._id.toString()] = item.count;
-      });
-    }
+    const connectionMap = {};
+    connectionCounts.forEach(item => {
+      connectionMap[item._id.toString()] = item.count;
+    });
 
     // Format to return users who liked current user
     const likes = matches.map(match => {
@@ -804,11 +796,6 @@ exports.getSentLikes = async (req, res) => {
     .populate('user2', '-password')
     .sort({ createdAt: -1 });
 
-    // If no matches, return empty array
-    if (!matches || matches.length === 0) {
-      return res.json([]);
-    }
-
     // Get connection counts for all users current user has liked
     const userIds = matches.map(match => {
       return match.user1._id.toString() === currentUserId 
@@ -816,36 +803,33 @@ exports.getSentLikes = async (req, res) => {
         : match.user1._id;
     });
 
-    // Only run aggregation if we have userIds
-    let connectionMap = {};
-    if (userIds.length > 0) {
-      const connectionCounts = await Match.aggregate([
-        {
-          $match: {
-            $or: [
-              { user1: { $in: userIds }, matched: true },
-              { user2: { $in: userIds }, matched: true }
-            ]
-          }
-        },
-        {
-          $group: {
-            _id: {
-              $cond: [
-                { $in: ['$user1', userIds] },
-                '$user1',
-                '$user2'
-              ]
-            },
-            count: { $sum: 1 }
-          }
+    const connectionCounts = await Match.aggregate([
+      {
+        $match: {
+          $or: [
+            { user1: { $in: userIds }, matched: true },
+            { user2: { $in: userIds }, matched: true }
+          ]
         }
-      ]);
+      },
+      {
+        $group: {
+          _id: {
+            $cond: [
+              { $in: ['$user1', userIds] },
+              '$user1',
+              '$user2'
+            ]
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-      connectionCounts.forEach(item => {
-        connectionMap[item._id.toString()] = item.count;
-      });
-    }
+    const connectionMap = {};
+    connectionCounts.forEach(item => {
+      connectionMap[item._id.toString()] = item.count;
+    });
 
     // Format to return users current user has liked
     const sentLikes = matches.map(match => {

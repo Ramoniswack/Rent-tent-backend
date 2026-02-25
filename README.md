@@ -353,6 +353,45 @@ The server logs all requests and errors to the console in development mode.
 - **File Upload**: Multer + Cloudinary
 - **Weather API**: OpenWeatherMap
 - **Security**: bcryptjs, cors, helmet
+- **Real-time**: Socket.IO (messaging, notifications, calls)
+- **WebRTC**: Metered.ca (TURN/STUN servers)
+- **Push Notifications**: Firebase Admin SDK
+
+---
+
+## Troubleshooting
+
+### Server won't start
+1. Check if MongoDB is running and accessible
+2. Verify all environment variables are set in `.env`
+3. Run `npm install` to ensure all dependencies are installed
+4. Check if port 5000 is already in use
+
+### MongoDB connection error
+- Verify `MONGODB_URI` in `.env` is correct
+- Check network connectivity
+- Ensure MongoDB Atlas IP whitelist includes your IP (if using Atlas)
+
+### Authentication issues
+- Verify `JWT_SECRET` is set in `.env`
+- Check token expiration (tokens expire after 30 days)
+- Ensure Authorization header format: `Bearer <token>`
+
+### File upload fails
+- Verify Cloudinary credentials in `.env`
+- Check file size (max 5MB)
+- Ensure file is an image format
+
+### Socket.IO connection issues
+- Check CORS configuration in `server.js`
+- Verify `FRONTEND_URL` in `.env` matches your frontend URL
+- Check browser console for WebSocket errors
+
+### Quick Health Check
+Run this command to test the backend:
+```bash
+node -e "require('dotenv').config(); const mongoose = require('mongoose'); mongoose.connect(process.env.MONGODB_URI).then(() => { console.log('✅ Backend is healthy'); process.exit(0); }).catch(err => { console.error('❌ Error:', err.message); process.exit(1); });"
+```
 
 ---
 

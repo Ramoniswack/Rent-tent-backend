@@ -341,11 +341,6 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    // TEMPORARY: Disable permission check for testing
-    // TODO: Re-enable after confirming messages work
-    const hasPermission = true;
-    
-    /*
     // Verify match exists OR mutual connection exists
     const [user1, user2] = [userId, receiverId].sort();
     const match = await Match.findOne({
@@ -386,12 +381,11 @@ exports.sendMessage = async (req, res) => {
     if (!hasPermission) {
       console.log('❌ Message blocked: No permission');
       return res.status(403).json({ 
-        error: 'You can only message users you have matched with or connected with. Match with them on the swipe page or connect on the discover page first.' 
+        error: 'You can only message users you have matched with. Like each other on the match page first!' 
       });
     }
 
     console.log('✅ Message permission granted');
-    */
 
     // Verify replyTo message exists if provided
     if (replyToId) {
