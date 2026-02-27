@@ -1,11 +1,35 @@
 # NomadNotes Backend API
 
-Node.js/Express backend for the NomadNotes travel itinerary planner.
+Node.js/Express backend for the NomadNotes travel platform with real-time features, email notifications, and comprehensive API endpoints.
+
+## Latest Features ✨
+
+### Newsletter System
+- Newsletter subscription management
+- Email validation and duplicate handling
+- Welcome email automation
+- Admin endpoints for subscriber management
+- Subscription statistics
+
+### Email Notifications
+- Welcome emails on registration
+- Gear rental order notifications
+- Booking confirmation emails
+- Match notification emails
+- Newsletter welcome emails
+- Beautiful HTML templates with Lucide SVG icons
+
+### Footer Menu Management
+- Dynamic footer menu configuration
+- Product and Company menu sections
+- Admin API for menu management
+- Real-time updates
 
 ## ✅ Status
 - **Server**: Running on http://localhost:5000
 - **MongoDB**: Connected successfully
 - **Health Check**: http://localhost:5000/api/health
+- **API Documentation**: http://localhost:5000/api-docs (Swagger)
 
 ## Setup
 
@@ -25,10 +49,35 @@ cp .env.example .env
 PORT=5000
 MONGODB_URI=mongodb://localhost:27017/nomadnotes
 JWT_SECRET=your_jwt_secret_key_here
+
+# Weather API
 OPENWEATHER_API_KEY=your_openweathermap_api_key_here
+
+# Cloudinary (Image Upload)
 CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
 CLOUDINARY_API_KEY=your_cloudinary_api_key
 CLOUDINARY_API_SECRET=your_cloudinary_api_secret
+
+# Email (SMTP)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+SMTP_FROM=your_email@gmail.com
+SMTP_FROM_NAME=NomadNotes
+
+# WebRTC (Metered.ca)
+METERED_API_KEY=your_metered_api_key
+METERED_SECRET_KEY=your_metered_secret_key
+
+# Firebase (Push Notifications)
+FIREBASE_PROJECT_ID=your_firebase_project_id
+FIREBASE_PRIVATE_KEY=your_firebase_private_key
+FIREBASE_CLIENT_EMAIL=your_firebase_client_email
+
+# Frontend URL
+FRONTEND_URL=http://localhost:3000
 ```
 
 4. Start the server:
@@ -197,6 +246,57 @@ npm start    # Production
   - Max size: 5MB
   - Allowed: Image files only
   - Returns: `{ url: 'cloudinary_url' }`
+
+---
+
+### 📧 Contact & Newsletter
+
+#### Contact Form
+- **POST** `/api/contact` - Send contact form email
+  - Body: `{ name, email, subject, message }`
+  - Returns: `{ success: true, message: 'Email sent successfully' }`
+
+#### Newsletter (Public)
+- **POST** `/api/newsletter/subscribe` - Subscribe to newsletter
+  - Body: `{ email, source?: 'footer' | 'popup' | 'checkout' | 'other' }`
+  - Returns: `{ success: true, message: 'Successfully subscribed!', subscription }`
+  - Sends welcome email automatically
+
+- **POST** `/api/newsletter/unsubscribe` - Unsubscribe from newsletter
+  - Body: `{ email }`
+  - Returns: `{ success: true, message: 'Successfully unsubscribed' }`
+
+#### Newsletter (Admin Only)
+- **GET** `/api/newsletter/subscribers` - Get all subscribers
+  - Query: `?active=true&page=1&limit=50`
+  - Returns: `{ success: true, subscribers: [...], pagination: {...} }`
+
+- **GET** `/api/newsletter/stats` - Get newsletter statistics
+  - Returns: `{ success: true, stats: { totalSubscribers, totalUnsubscribed, todaySubscribers, sourceBreakdown } }`
+
+---
+
+### ⚙️ Site Settings & Configuration
+
+#### Footer Menus (Admin Only)
+- **GET** `/api/profile-field-options` - Get all configuration options
+  - Returns: `{ footerProductMenu: [...], footerCompanyMenu: [...], ... }`
+
+- **PUT** `/api/profile-field-options/footerProductMenu` - Update product menu
+  - Body: `{ menuItems: [{ label, url }, ...] }`
+  - Returns: `{ message: 'Updated successfully', options }`
+
+- **PUT** `/api/profile-field-options/footerCompanyMenu` - Update company menu
+  - Body: `{ menuItems: [{ label, url }, ...] }`
+  - Returns: `{ message: 'Updated successfully', options }`
+
+#### Site Settings (Admin Only)
+- **GET** `/api/site-settings` - Get all site settings
+  - Returns: `{ serviceFeePercentage, platformName, supportEmail, logoText, ... }`
+
+- **PUT** `/api/admin/site-settings/:key` - Update specific setting
+  - Body: `{ value: <new_value> }`
+  - Returns: `{ message: 'Setting updated', setting }`
 
 ---
 
