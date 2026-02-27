@@ -1,6 +1,7 @@
 const GearRental = require('../models/GearRental');
 const RentalBooking = require('../models/RentalBooking');
 const User = require('../models/User');
+const { sendEmail } = require('../services/emailService');
 
 // Get all gear rentals with filters
 exports.getAllGear = async (req, res) => {
@@ -321,6 +322,17 @@ exports.createBooking = async (req, res) => {
       .populate('renter', 'name email profilePicture username')
       .populate('owner', 'name email profilePicture username');
 
+    // Send new order email to owner (non-blocking)
+    sendEmail(
+      populatedBooking.owner.email,
+      'newOrder',
+      {
+        booking: populatedBooking,
+        gear: populatedBooking.gear,
+        renter: populatedBooking.renter
+      }
+    ).catch(err => console.error('Failed to send new order email:', err.message));
+
     res.status(201).json(populatedBooking);
   } catch (error) {
     console.error('Error creating booking:', error);
@@ -415,6 +427,19 @@ exports.updateBookingStatus = async (req, res) => {
       .populate('gear')
       .populate('renter', 'name email profilePicture username')
       .populate('owner', 'name email profilePicture username');
+
+    // Send order confirmed email to renter when status changes to confirmed
+    if (status === 'confirmed') {
+      sendEmail(
+        populatedBooking.renter.email,
+        'orderConfirmed',
+        {
+          booking: populatedBooking,
+          gear: populatedBooking.gear,
+          owner: populatedBooking.owner
+        }
+      ).catch(err => console.error('Failed to send order confirmed email:', err.message));
+    }
 
     res.json(populatedBooking);
   } catch (error) {

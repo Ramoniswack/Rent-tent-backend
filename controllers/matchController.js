@@ -1,6 +1,7 @@
 const Match = require('../models/Match');
 const User = require('../models/User');
 const mongoose = require('mongoose');
+const { sendEmail } = require('../services/emailService');
 
 // Discover potential matches with optimized geospatial filtering and database-level scoring
 exports.discover = async (req, res) => {
@@ -556,6 +557,23 @@ exports.likeUser = async (req, res) => {
         profilePicture: likedUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(likedUser.name)}&background=random`,
         bio: likedUser.bio || ''
       };
+
+      // Send match notification emails to both users (non-blocking)
+      const currentUser = await User.findById(currentUserId);
+      
+      // Email to current user
+      sendEmail(
+        currentUser.email,
+        'newMatch',
+        { currentUser, matchedUser: likedUser }
+      ).catch(err => console.error('Failed to send match email to current user:', err.message));
+
+      // Email to matched user
+      sendEmail(
+        likedUser.email,
+        'newMatch',
+        { currentUser: likedUser, matchedUser: currentUser }
+      ).catch(err => console.error('Failed to send match email to matched user:', err.message));
     }
 
     res.json(response);

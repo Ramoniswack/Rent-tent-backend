@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { sendEmail } = require('../services/emailService');
 
 // Generate JWT token
 const generateToken = (userId) => {
@@ -55,6 +56,11 @@ exports.register = async (req, res) => {
     // Create new user
     const user = new User({ email, password, name, username });
     await user.save();
+
+    // Send welcome email (non-blocking)
+    sendEmail(user.email, 'welcome', user).catch(err => 
+      console.error('Failed to send welcome email:', err.message)
+    );
 
     const token = generateToken(user._id);
     res.status(201).json({

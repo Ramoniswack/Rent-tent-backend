@@ -23,6 +23,8 @@ const pageRoutes = require('./routes/pageRoutes');
 const profileFieldOptionsRoutes = require('./routes/profileFieldOptionsRoutes');
 const siteSettingsRoutes = require('./routes/siteSettingsRoutes');
 const adminSiteSettingsRoutes = require('./routes/adminSiteSettingsRoutes');
+const contactRoutes = require('./routes/contactRoutes');
+const newsletterRoutes = require('./routes/newsletterRoutes');
 
 const app = express();
 
@@ -67,6 +69,8 @@ app.use('/api/pages', pageRoutes);
 app.use('/api/profile-field-options', profileFieldOptionsRoutes);
 app.use('/api/site-settings', siteSettingsRoutes);
 app.use('/api/admin/site-settings', adminSiteSettingsRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/newsletter', newsletterRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
