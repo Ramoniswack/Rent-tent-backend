@@ -46,6 +46,9 @@ exports.updateOptions = async (req, res) => {
     const { fieldType } = req.params;
     const { options, features, menuItems } = req.body;
     
+    console.log('Update request for fieldType:', fieldType);
+    console.log('Request body keys:', Object.keys(req.body));
+    
     const updateData = {
       fieldType,
       lastModifiedBy: req.userId
@@ -65,6 +68,8 @@ exports.updateOptions = async (req, res) => {
       
       updateData.features = cleanedFeatures;
     } else if (fieldType === 'footerProductMenu' || fieldType === 'footerCompanyMenu') {
+      console.log('Processing footer menu, menuItems:', menuItems);
+      
       if (!menuItems || !Array.isArray(menuItems)) {
         return res.status(400).json({ error: 'Menu items array is required for footer menus' });
       }
@@ -72,14 +77,18 @@ exports.updateOptions = async (req, res) => {
       // Validate menu items structure
       const cleanedMenuItems = menuItems.filter(item => item && item.label && item.url);
       
-      if (cleanedMenuItems.length === 0) {
-        return res.status(400).json({ error: 'At least one valid menu item is required' });
-      }
-      
+      // Allow empty arrays for footer menus
       updateData.menuItems = cleanedMenuItems;
     } else {
+      console.log('Falling to default options handling for fieldType:', fieldType);
+      
       if (!options || !Array.isArray(options)) {
-        return res.status(400).json({ error: 'Options array is required' });
+        return res.status(400).json({ 
+          error: 'Options array is required',
+          receivedFieldType: fieldType,
+          receivedBodyKeys: Object.keys(req.body),
+          hint: 'For footer menus, use menuItems array. For other fields, use options array.'
+        });
       }
       
       // Remove duplicates and empty strings

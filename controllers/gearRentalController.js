@@ -267,10 +267,10 @@ exports.createBooking = async (req, res) => {
 
     const totalPrice = totalDays * gear.pricePerDay;
 
-    // Check for conflicting bookings
+    // Check for conflicting bookings (exclude cancelled and completed)
     const conflictingBooking = await RentalBooking.findOne({
       gear: gearId,
-      status: { $in: ['confirmed', 'active'] },
+      status: { $nin: ['cancelled', 'completed'] },
       $or: [
         { startDate: { $lte: end }, endDate: { $gte: start } }
       ]
@@ -494,10 +494,10 @@ exports.getUnavailableDates = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find all confirmed and active bookings for this gear
+    // Find all non-cancelled bookings for this gear
     const bookings = await RentalBooking.find({
       gear: id,
-      status: { $in: ['confirmed', 'active'] }
+      status: { $nin: ['cancelled', 'completed'] }
     }).select('startDate endDate');
 
     // Get manually blocked dates from gear
@@ -571,5 +571,142 @@ exports.manageAvailability = async (req, res) => {
   } catch (error) {
     console.error('Error managing availability:', error);
     res.status(500).json({ error: 'Failed to manage availability' });
+  }
+};
+
+// Get analytics dashboard data for owner
+exports.getOwnerAnalytics = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { startDate, endDate } = req.query;
+
+    // Build date filter
+    const dateFilter = {};
+    if (startDate || endDate) {
+      dateFilter.createdAt = {};
+      if (startDate) dateFilter.createdAt.$gte = new Date(startDate);
+      if (endDate) dateFilter.createdAt.$lte = new Date(endDate);
+    }
+
+    // Get all bookings for owner's gear
+    const bookings = await RentalBooking.find({
+      owner: userId,
+      ...dateFilter
+    })
+      .populate('gear', 'title category pricePerDay')
+      .populate('renter', 'name profilePicture')
+      .sort({ createdAt: -1 });
+
+    // Calculate revenue metrics
+    const totalRevenue = bookings
+      .filter(b => ['completed', 'active', 'in_use'].includes(b.status))
+      .reduce((sum, b) => sum + b.totalPrice, 0);
+
+    const pendingRevenue = bookings
+      .filter(b => ['pending', 'confirmed'].includes(b.status))
+      .reduce((sum, b) => sum + b.totalPrice, 0);
+
+    const completedBookings = bookings.filter(b => b.status === 'completed').length;
+    const activeBookings = bookings.filter(b => ['active', 'in_use', 'picked_up'].includes(b.status)).length;
+    const cancelledBookings = bookings.filter(b => b.status === 'cancelled').length;
+
+    // Revenue by month (last 6 months)
+    const monthlyRevenue = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      
+      const revenue = bookings
+        .filter(b => {
+          const bookingDate = new Date(b.createdAt);
+          return bookingDate >= monthStart && bookingDate <= monthEnd && 
+                 ['completed', 'active', 'in_use'].includes(b.status);
+        })
+        .reduce((sum, b) => sum + b.totalPrice, 0);
+
+      monthlyRevenue.push({
+        month: monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        revenue
+      });
+    }
+
+    // Bookings by status
+    const bookingsByStatus = {
+      pending: bookings.filter(b => b.status === 'pending').length,
+      confirmed: bookings.filter(b => b.status === 'confirmed').length,
+      active: bookings.filter(b => ['active', 'in_use', 'picked_up'].includes(b.status)).length,
+      completed: completedBookings,
+      cancelled: cancelledBookings
+    };
+
+    // Top performing gear
+    const gearPerformance = {};
+    bookings.forEach(booking => {
+      if (booking.gear && ['completed', 'active', 'in_use'].includes(booking.status)) {
+        const gearId = booking.gear._id.toString();
+        if (!gearPerformance[gearId]) {
+          gearPerformance[gearId] = {
+            gear: booking.gear,
+            bookings: 0,
+            revenue: 0
+          };
+        }
+        gearPerformance[gearId].bookings += 1;
+        gearPerformance[gearId].revenue += booking.totalPrice;
+      }
+    });
+
+    const topGear = Object.values(gearPerformance)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+
+    // Revenue by category
+    const categoryRevenue = {};
+    bookings.forEach(booking => {
+      if (booking.gear && ['completed', 'active', 'in_use'].includes(booking.status)) {
+        const category = booking.gear.category;
+        if (!categoryRevenue[category]) {
+          categoryRevenue[category] = 0;
+        }
+        categoryRevenue[category] += booking.totalPrice;
+      }
+    });
+
+    // Average booking value
+    const avgBookingValue = completedBookings > 0 
+      ? totalRevenue / completedBookings 
+      : 0;
+
+    // Total rental days
+    const totalRentalDays = bookings
+      .filter(b => ['completed', 'active', 'in_use'].includes(b.status))
+      .reduce((sum, b) => sum + b.totalDays, 0);
+
+    res.json({
+      summary: {
+        totalRevenue,
+        pendingRevenue,
+        completedBookings,
+        activeBookings,
+        cancelledBookings,
+        avgBookingValue,
+        totalRentalDays,
+        totalBookings: bookings.length
+      },
+      charts: {
+        monthlyRevenue,
+        bookingsByStatus,
+        categoryRevenue: Object.entries(categoryRevenue).map(([category, revenue]) => ({
+          category,
+          revenue
+        })),
+        topGear
+      },
+      recentBookings: bookings.slice(0, 10)
+    });
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics' });
   }
 };

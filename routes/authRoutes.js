@@ -109,6 +109,41 @@ router.post('/login', authController.login);
 
 /**
  * @swagger
+ * /auth/change-password:
+ *   post:
+ *     summary: Change user password
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *                 format: password
+ *               newPassword:
+ *                 type: string
+ *                 format: password
+ *     responses:
+ *       200:
+ *         description: Password changed successfully
+ *       401:
+ *         description: Current password is incorrect
+ *       400:
+ *         description: Validation error
+ */
+const auth = require('../middleware/auth');
+router.post('/change-password', auth, authController.changePassword);
+
+/**
+ * @swagger
  * /auth/google:
  *   post:
  *     summary: Login/Register with Google OAuth

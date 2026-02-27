@@ -27,4 +27,7 @@ router.get('/bookings/my-gear', gearRentalController.getGearBookings);
 router.patch('/bookings/:id/status', gearRentalController.updateBookingStatus);
 router.post('/bookings/:id/review', gearRentalController.addReview);
 
+// Analytics
+router.get('/analytics/dashboard', gearRentalController.getOwnerAnalytics);
+
 module.exports = router;
