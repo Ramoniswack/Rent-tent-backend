@@ -4,10 +4,11 @@ node_modules/
 *.log
 .env.example
 uploads/
-scripts/
 
 /doc
 
+# Database dumps (keep scripts, ignore export folders)
+dump/export-*/
 
 # Firebase service account (contains sensitive keys)
 config/firebase-service-account.json
