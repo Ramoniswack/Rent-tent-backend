@@ -67,10 +67,6 @@ SMTP_PASS=your_app_password
 SMTP_FROM=your_email@gmail.com
 SMTP_FROM_NAME=NomadNotes
 
-# WebRTC (Metered.ca)
-METERED_API_KEY=your_metered_api_key
-METERED_SECRET_KEY=your_metered_secret_key
-
 # Firebase (Push Notifications)
 FIREBASE_PROJECT_ID=your_firebase_project_id
 FIREBASE_PRIVATE_KEY=your_firebase_private_key

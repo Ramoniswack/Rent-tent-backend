@@ -18,7 +18,6 @@ const gearRentalRoutes = require('./routes/gearRentalRoutes');
 const matchRoutes = require('./routes/matchRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
-const callRoutes = require('./routes/callRoutes');
 const pageRoutes = require('./routes/pageRoutes');
 const profileFieldOptionsRoutes = require('./routes/profileFieldOptionsRoutes');
 const siteSettingsRoutes = require('./routes/siteSettingsRoutes');
@@ -66,7 +65,6 @@ app.use('/api/gear', gearRentalRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/calls', callRoutes);
 app.use('/api/pages', pageRoutes);
 app.use('/api/profile-field-options', profileFieldOptionsRoutes);
 app.use('/api/site-settings', siteSettingsRoutes);
@@ -112,14 +110,12 @@ const io = new Server(server, {
 // Initialize notification helper with io instance
 notificationHelper.setIO(io);
 
-// Store online users and active calls
+// Store online users
 const onlineUsers = new Map();
-const activeCalls = new Map(); // Track active calls: callId -> { caller, receiver, startTime, type }
 
 // Make io and onlineUsers accessible to controllers
 app.set('io', io);
 app.set('onlineUsers', onlineUsers);
-app.set('activeCalls', activeCalls);
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
@@ -429,172 +425,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Call signaling with acknowledgment and timeout handling
-  socket.on('call:offer', (data) => {
-    const { to, offer, type } = data;
-    const receiverSocketId = onlineUsers.get(to);
-    
-    if (receiverSocketId) {
-      const callId = `${socket.userId}_${to}_${Date.now()}`;
-      
-      // Store active call information
-      activeCalls.set(callId, {
-        caller: socket.userId,
-        receiver: to,
-        startTime: Date.now(),
-        type: type,
-        status: 'calling'
-      });
-      
-      // Send call offer to receiver
-      io.to(receiverSocketId).emit('call:incoming', { 
-        from: socket.userId, 
-        offer,
-        type,
-        callId
-      });
-      
-      // Set call timeout (30 seconds)
-      setTimeout(() => {
-        const call = activeCalls.get(callId);
-        if (call && call.status === 'calling') {
-          // Call timed out
-          activeCalls.delete(callId);
-          
-          // Notify caller of timeout
-          socket.emit('call:timeout');
-          
-          // Notify receiver to stop ringing
-          const receiverSocket = onlineUsers.get(to);
-          if (receiverSocket) {
-            io.to(receiverSocket).emit('call:timeout');
-          }
-          
-          console.log(`Call ${callId} timed out`);
-        }
-      }, 30000); // 30 second timeout
-      
-      console.log(`Call offer sent: ${callId} (${type})`);
-    } else {
-      // Receiver is offline
-      socket.emit('call:user_offline');
-    }
-  });
-
-  // Call received acknowledgment
-  socket.on('call:received', (data) => {
-    const { callId, from } = data;
-    const call = activeCalls.get(callId);
-    
-    if (call && call.caller === from) {
-      // Update call status
-      call.status = 'ringing';
-      activeCalls.set(callId, call);
-      
-      // Notify caller that receiver got the call (show "Ringing" state)
-      const callerSocketId = onlineUsers.get(from);
-      if (callerSocketId) {
-        io.to(callerSocketId).emit('call:ringing', { callId });
-      }
-      
-      console.log(`Call ${callId} acknowledged - now ringing`);
-    }
-  });
-
-  socket.on('call:answer', (data) => {
-    const { to, answer, callId } = data;
-    const call = activeCalls.get(callId);
-    
-    if (call) {
-      // Update call status
-      call.status = 'connected';
-      call.connectedAt = Date.now();
-      activeCalls.set(callId, call);
-      
-      const receiverSocketId = onlineUsers.get(to);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('call:accepted', { answer, callId });
-      }
-      
-      console.log(`Call ${callId} accepted and connected`);
-    }
-  });
-
-  socket.on('call:reject', (data) => {
-    const { to, callId } = data;
-    
-    if (callId && activeCalls.has(callId)) {
-      // Remove call from active calls
-      activeCalls.delete(callId);
-      
-      const receiverSocketId = onlineUsers.get(to);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('call:rejected', { callId });
-      }
-      
-      console.log(`Call ${callId} rejected`);
-    }
-  });
-
-  socket.on('call:end', (data) => {
-    const { to, callId } = data;
-    const call = activeCalls.get(callId);
-    
-    if (call) {
-      // Calculate call duration
-      const duration = call.connectedAt ? Date.now() - call.connectedAt : 0;
-      
-      // Remove call from active calls
-      activeCalls.delete(callId);
-      
-      const receiverSocketId = onlineUsers.get(to);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('call:ended', { callId, duration });
-      }
-      
-      console.log(`Call ${callId} ended - duration: ${Math.round(duration / 1000)}s`);
-    }
-  });
-
-  socket.on('ice:candidate', (data) => {
-    const { to, candidate } = data;
-    const receiverSocketId = onlineUsers.get(to);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit('ice:candidate', { candidate });
-    }
-  });
-
-  // Disconnect cleanup - automatically end active calls
+  // Disconnect cleanup
   socket.on('disconnect', () => {
     if (socket.userId) {
-      // Find and end any active calls involving this user
-      const userCalls = Array.from(activeCalls.entries()).filter(([callId, call]) => 
-        call.caller === socket.userId || call.receiver === socket.userId
-      );
-      
-      userCalls.forEach(([callId, call]) => {
-        // Determine the other party
-        const otherUserId = call.caller === socket.userId ? call.receiver : call.caller;
-        const otherSocketId = onlineUsers.get(otherUserId);
-        
-        if (otherSocketId) {
-          // Notify the other party that the call ended due to disconnect
-          io.to(otherSocketId).emit('call:ended', { 
-            callId, 
-            reason: 'user_disconnected',
-            duration: call.connectedAt ? Date.now() - call.connectedAt : 0
-          });
-        }
-        
-        // Remove the call
-        activeCalls.delete(callId);
-        console.log(`Call ${callId} ended due to user ${socket.userId} disconnect`);
-      });
-      
       // Remove user from online users
       onlineUsers.delete(socket.userId);
       io.emit('user:offline', socket.userId);
-      console.log(`User ${socket.userId} disconnected - ${userCalls.length} calls ended`);
+      console.log(`User ${socket.userId} disconnected`);
     }
   });
 });
