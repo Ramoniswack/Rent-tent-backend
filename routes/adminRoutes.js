@@ -12,6 +12,9 @@ router.use(adminAuth);
 // Dashboard stats
 router.get('/stats', adminController.getStats);
 
+// Analytics
+router.get('/analytics', adminController.getAnalytics);
+
 // User management
 router.get('/users', adminController.getUsers);
 router.patch('/users/:id', adminController.updateUser);

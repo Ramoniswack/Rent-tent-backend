@@ -64,3 +64,33 @@ exports.updateSetting = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// POST /api/admin/settings - Create or update setting (admin only)
+exports.createOrUpdateSetting = async (req, res) => {
+  try {
+    const { settingKey, settingValue, description } = req.body;
+    
+    if (!settingKey || settingValue === undefined) {
+      return res.status(400).json({ error: 'settingKey and settingValue are required' });
+    }
+    
+    const updated = await SiteSettings.findOneAndUpdate(
+      { settingKey },
+      { 
+        settingKey,
+        settingValue,
+        description: description || '',
+        lastModifiedBy: req.userId 
+      },
+      { new: true, upsert: true, runValidators: true }
+    );
+    
+    res.json({ 
+      message: 'Setting saved successfully', 
+      setting: updated 
+    });
+  } catch (error) {
+    console.error('Error saving site setting:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

@@ -347,3 +347,126 @@ exports.updateHomePage = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// GET /api/admin/analytics - Get revenue analytics
+exports.getAnalytics = async (req, res) => {
+  try {
+    const RentalBooking = require('../models/RentalBooking');
+    const WalletTransaction = require('../models/WalletTransaction');
+    
+    // Get all completed bookings
+    const completedBookings = await RentalBooking.find({ status: 'completed' })
+      .populate('renter', 'name')
+      .populate('gear', 'title');
+    
+    // Calculate total revenue from bookings
+    const totalBookingRevenue = completedBookings.reduce((sum, booking) => sum + (booking.totalPrice || 0), 0);
+    
+    // Get commission transactions
+    const commissionTransactions = await WalletTransaction.find({ 
+      type: 'debit',
+      'metadata.reason': 'commission'
+    });
+    
+    const commissionRevenue = commissionTransactions.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    
+    // Get wallet recharge transactions
+    const rechargeTransactions = await WalletTransaction.find({ 
+      type: 'credit',
+      'metadata.paymentMethod': 'esewa'
+    });
+    
+    const walletRecharges = rechargeTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+    
+    // Total revenue
+    const totalRevenue = totalBookingRevenue + walletRecharges;
+    
+    // Get booking counts
+    const [totalBookings, activeBookings] = await Promise.all([
+      RentalBooking.countDocuments(),
+      RentalBooking.countDocuments({ status: { $in: ['confirmed', 'in_use'] } })
+    ]);
+    
+    // Get user and gear counts
+    const [totalUsers, totalGear] = await Promise.all([
+      User.countDocuments(),
+      GearRental.countDocuments()
+    ]);
+    
+    // Calculate growth (mock data for now - you can implement actual comparison with previous period)
+    const revenueGrowth = 12.5;
+    const bookingsGrowth = 8.3;
+    
+    // Get monthly revenue for the last 12 months
+    const monthlyRevenue = [];
+    const now = new Date();
+    
+    for (let i = 11; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+      
+      const monthBookings = await RentalBooking.find({
+        status: 'completed',
+        updatedAt: { $gte: monthStart, $lte: monthEnd }
+      });
+      
+      const monthRevenue = monthBookings.reduce((sum, booking) => sum + (booking.totalPrice || 0), 0);
+      
+      monthlyRevenue.push({
+        month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
+        revenue: monthRevenue
+      });
+    }
+    
+    // Get all transactions (commissions and recharges)
+    const allCommissions = await WalletTransaction.find({ 
+      type: 'debit',
+      'metadata.reason': 'commission'
+    })
+      .populate('userId', 'name')
+      .sort({ createdAt: -1 });
+    
+    const allRecharges = await WalletTransaction.find({ 
+      type: 'credit',
+      'metadata.paymentMethod': 'esewa'
+    })
+      .populate('userId', 'name')
+      .sort({ createdAt: -1 });
+    
+    const recentTransactions = [
+      ...allCommissions.map(tx => ({
+        date: tx.createdAt,
+        type: 'commission',
+        userName: tx.userId?.name,
+        amount: Math.abs(tx.amount),
+        description: tx.metadata?.description || 'Commission deduction'
+      })),
+      ...allRecharges.map(tx => ({
+        date: tx.createdAt,
+        type: 'recharge',
+        userName: tx.userId?.name,
+        amount: tx.amount,
+        description: 'Wallet recharge via eSewa'
+      }))
+    ]
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    res.json({
+      totalRevenue,
+      commissionRevenue,
+      walletRecharges,
+      totalBookings,
+      completedBookings: completedBookings.length,
+      activeBookings,
+      totalUsers,
+      totalGear,
+      revenueGrowth,
+      bookingsGrowth,
+      monthlyRevenue,
+      recentTransactions
+    });
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

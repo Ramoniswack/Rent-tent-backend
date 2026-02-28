@@ -80,11 +80,11 @@ exports.getGearByUser = async (req, res) => {
     const { username } = req.params;
 
     // Find user by username
-    const user = await User.findOne({ username });
+    const user = await User.findOne({ username }).select('_id name username profilePicture location bio');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-
+    
     // Find all gear owned by this user
     const gear = await GearRental.find({ owner: user._id, available: true })
       .populate('owner', 'name email profilePicture username location bio')
@@ -133,21 +133,11 @@ exports.createGear = async (req, res) => {
     const user = await User.findById(userId);
     if (!user.sellerWallet || !user.sellerWallet.credits) {
       user.sellerWallet = {
-        credits: 500, // Free trial credits
+        credits: 0, // Start with 0, pay only when you earn
         totalRecharged: 0,
         totalSpent: 0
       };
       await user.save();
-    }
-
-    // Check if user has enough credits for listing
-    const LISTING_FEE = 100; // NPR per month
-    if (user.sellerWallet.credits < LISTING_FEE) {
-      return res.status(402).json({ 
-        error: 'Insufficient credits. Please recharge your wallet to list gear.',
-        requiredCredits: LISTING_FEE,
-        currentCredits: user.sellerWallet.credits
-      });
     }
 
     const gear = await GearRental.create({
@@ -162,19 +152,8 @@ exports.createGear = async (req, res) => {
       images: images || [],
       specifications: specifications || {},
       minimumRentalDays: minimumRentalDays || 1,
-      deposit: deposit || 0,
-      listingFee: {
-        costPerMonth: LISTING_FEE,
-        lastChargeDate: new Date(),
-        nextChargeDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        isPaid: true
-      }
+      deposit: deposit || 0
     });
-
-    // Deduct listing fee from wallet
-    user.sellerWallet.credits -= LISTING_FEE;
-    user.sellerWallet.totalSpent += LISTING_FEE;
-    await user.save();
 
     const populatedGear = await GearRental.findById(gear._id)
       .populate('owner', 'name email profilePicture');
@@ -300,10 +279,10 @@ exports.createBooking = async (req, res) => {
 
     const totalPrice = totalDays * gear.pricePerDay;
 
-    // Check for conflicting bookings (exclude cancelled and completed)
+    // Check for conflicting bookings (only confirmed bookings block dates)
     const conflictingBooking = await RentalBooking.findOne({
       gear: gearId,
-      status: { $nin: ['cancelled', 'completed'] },
+      status: { $in: ['confirmed', 'picked_up', 'returned', 'inspected'] },
       $or: [
         { startDate: { $lte: end }, endDate: { $gte: start } }
       ]
@@ -577,14 +556,16 @@ exports.getGearReviews = async (req, res) => {
 };
 
 // Get unavailable dates for a gear item
+// Get unavailable dates for a gear item
 exports.getUnavailableDates = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find all non-cancelled bookings for this gear
+    // Find only confirmed and active bookings (not pending)
+    // Pending bookings don't block dates until owner confirms
     const bookings = await RentalBooking.find({
       gear: id,
-      status: { $nin: ['cancelled', 'completed'] }
+      status: { $in: ['confirmed', 'picked_up', 'returned', 'inspected'] }
     }).select('startDate endDate');
 
     // Get manually blocked dates from gear
