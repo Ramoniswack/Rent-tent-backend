@@ -133,7 +133,51 @@ const userSchema = new mongoose.Schema({
   following: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }]
+  }],
+  wishlist: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'GearRental'
+  }],
+  // Seller subscription/credit system
+  sellerWallet: {
+    credits: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    lastRechargeDate: {
+      type: Date
+    },
+    totalRecharged: {
+      type: Number,
+      default: 0
+    },
+    totalSpent: {
+      type: Number,
+      default: 0
+    }
+  },
+  sellerSubscription: {
+    isActive: {
+      type: Boolean,
+      default: false
+    },
+    plan: {
+      type: String,
+      enum: ['free', 'basic', 'premium', 'enterprise'],
+      default: 'free'
+    },
+    startDate: {
+      type: Date
+    },
+    endDate: {
+      type: Date
+    },
+    autoRenew: {
+      type: Boolean,
+      default: false
+    }
+  }
 }, {
   timestamps: true
 });

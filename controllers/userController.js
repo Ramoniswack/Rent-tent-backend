@@ -87,6 +87,22 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
+// GET /api/user/:id - Get user by ID
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await User.findById(id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // GET /api/user/profile/:username - Get user profile by username
 exports.getUserByUsername = async (req, res) => {
   try {

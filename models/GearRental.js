@@ -104,7 +104,27 @@ const gearRentalSchema = new mongoose.Schema({
       type: Date,
       required: true
     }
-  }]
+  }],
+  // Listing fee tracking
+  listingFee: {
+    costPerMonth: {
+      type: Number,
+      default: 100 // NPR per month
+    },
+    lastChargeDate: {
+      type: Date
+    },
+    nextChargeDate: {
+      type: Date
+    },
+    isPaid: {
+      type: Boolean,
+      default: false
+    },
+    autoDeactivateDate: {
+      type: Date
+    }
+  }
 }, {
   timestamps: true
 });

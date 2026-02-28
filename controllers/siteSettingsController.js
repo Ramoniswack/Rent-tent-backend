@@ -28,7 +28,7 @@ exports.getSettingByKey = async (req, res) => {
       return res.status(404).json({ error: 'Setting not found' });
     }
     
-    res.json({ key: setting.settingKey, value: setting.settingValue });
+    res.json({ settingKey: setting.settingKey, settingValue: setting.settingValue });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

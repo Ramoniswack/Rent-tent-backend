@@ -129,6 +129,27 @@ exports.createGear = async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Check/initialize seller wallet
+    const user = await User.findById(userId);
+    if (!user.sellerWallet || !user.sellerWallet.credits) {
+      user.sellerWallet = {
+        credits: 500, // Free trial credits
+        totalRecharged: 0,
+        totalSpent: 0
+      };
+      await user.save();
+    }
+
+    // Check if user has enough credits for listing
+    const LISTING_FEE = 100; // NPR per month
+    if (user.sellerWallet.credits < LISTING_FEE) {
+      return res.status(402).json({ 
+        error: 'Insufficient credits. Please recharge your wallet to list gear.',
+        requiredCredits: LISTING_FEE,
+        currentCredits: user.sellerWallet.credits
+      });
+    }
+
     const gear = await GearRental.create({
       owner: userId,
       title,
@@ -141,8 +162,19 @@ exports.createGear = async (req, res) => {
       images: images || [],
       specifications: specifications || {},
       minimumRentalDays: minimumRentalDays || 1,
-      deposit: deposit || 0
+      deposit: deposit || 0,
+      listingFee: {
+        costPerMonth: LISTING_FEE,
+        lastChargeDate: new Date(),
+        nextChargeDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        isPaid: true
+      }
     });
+
+    // Deduct listing fee from wallet
+    user.sellerWallet.credits -= LISTING_FEE;
+    user.sellerWallet.totalSpent += LISTING_FEE;
+    await user.save();
 
     const populatedGear = await GearRental.findById(gear._id)
       .populate('owner', 'name email profilePicture');
@@ -421,6 +453,36 @@ exports.updateBookingStatus = async (req, res) => {
       await GearRental.findByIdAndUpdate(booking.gear._id, {
         $inc: { totalRentals: 1 }
       });
+
+      // Automatically deduct platform commission
+      try {
+        const walletController = require('./walletController');
+        
+        // Create a mock request object for the wallet controller
+        const mockReq = {
+          body: { bookingId: booking._id },
+          userId: booking.gear.owner.toString()
+        };
+        
+        const mockRes = {
+          json: (data) => {
+            console.log('Commission deducted:', data);
+            return data;
+          },
+          status: (code) => ({
+            json: (data) => {
+              console.error('Commission deduction error:', data);
+              return data;
+            }
+          })
+        };
+        
+        await walletController.deductCommission(mockReq, mockRes);
+      } catch (commissionError) {
+        console.error('Failed to deduct commission:', commissionError.message);
+        // Don't fail the booking completion if commission deduction fails
+        // Admin can manually process it later
+      }
     }
 
     const populatedBooking = await RentalBooking.findById(booking._id)

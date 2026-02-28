@@ -4,6 +4,7 @@ const {
   getProfile, 
   updateProfile, 
   getAllUsers,
+  getUserById,
   getUserByUsername,
   checkUsernameAvailability,
   getUserStats,
@@ -16,6 +17,7 @@ const auth = require('../middleware/auth');
 router.get('/profile', auth, getProfile);
 router.patch('/profile', auth, updateProfile);
 router.get('/all', auth, getAllUsers);
+router.get('/:id', auth, getUserById);
 router.get('/profile/:username', auth, getUserByUsername);
 router.get('/check-username/:username', checkUsernameAvailability); // Public endpoint for registration
 router.get('/stats', auth, getUserStats);

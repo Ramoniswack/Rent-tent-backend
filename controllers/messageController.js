@@ -59,6 +59,61 @@ exports.getMatches = async (req, res) => {
 
     console.log(`Found ${mutualConnectionUsers.length} unique mutual connection users`);
 
+    // Find marketplace conversations (gear rental bookings)
+    const RentalBooking = require('../models/RentalBooking');
+    const rentalBookings = await RentalBooking.find({
+      $or: [
+        { renter: userId },
+        { owner: userId }
+      ]
+    })
+    .populate('renter', 'name email profilePicture username')
+    .populate('owner', 'name email profilePicture username')
+    .lean();
+
+    console.log(`Found ${rentalBookings.length} rental bookings for user ${userId}`);
+
+    // Get unique marketplace conversation partners
+    const marketplaceUserIds = new Set();
+    rentalBookings.forEach(booking => {
+      const otherUserId = booking.renter._id.toString() === userId ? booking.owner._id.toString() : booking.renter._id.toString();
+      marketplaceUserIds.add(otherUserId);
+    });
+
+    // Find gear inquiry conversations (users who have messaged about gear)
+    const GearRental = require('../models/GearRental');
+    const gearInquiryMessages = await Message.find({
+      $or: [
+        { sender: userId },
+        { receiver: userId }
+      ]
+    })
+    .select('sender receiver')
+    .lean();
+
+    // Get unique user IDs from gear inquiry messages
+    const gearInquiryUserIds = new Set();
+    for (const msg of gearInquiryMessages) {
+      const otherUserId = msg.sender.toString() === userId ? msg.receiver.toString() : msg.sender.toString();
+      
+      // Check if this user owns gear or if current user owns gear
+      const hasGearRelationship = await GearRental.findOne({
+        $or: [
+          { owner: userId },
+          { owner: otherUserId }
+        ]
+      });
+      
+      if (hasGearRelationship && 
+          !matchedUserIds.includes(otherUserId) && 
+          !uniqueMutualConnectionIds.includes(otherUserId) &&
+          !marketplaceUserIds.has(otherUserId)) {
+        gearInquiryUserIds.add(otherUserId);
+      }
+    }
+
+    console.log(`Found ${gearInquiryUserIds.size} gear inquiry conversations for user ${userId}`);
+
     // For each match, get the other user and last message
     const matchesWithDetails = await Promise.all(
       matches.map(async (match) => {
@@ -153,8 +208,107 @@ exports.getMatches = async (req, res) => {
       })
     );
 
-    // Combine matches and connections
-    const allConversations = [...matchesWithDetails, ...connectionsWithDetails];
+    // Process marketplace conversations
+    const marketplaceConversations = await Promise.all(
+      Array.from(marketplaceUserIds).map(async (otherUserId) => {
+        try {
+          // Skip if already in matches or connections
+          if (matchedUserIds.includes(otherUserId) || uniqueMutualConnectionIds.includes(otherUserId)) {
+            return null;
+          }
+
+          const otherUser = await User.findById(otherUserId).select('name email profilePicture username').lean();
+          
+          if (!otherUser) {
+            return null;
+          }
+
+          // Get last message between these users
+          const lastMessage = await Message.findOne({
+            $or: [
+              { sender: userId, receiver: otherUserId },
+              { sender: otherUserId, receiver: userId }
+            ]
+          }).sort({ createdAt: -1 }).lean();
+
+          // Count unread messages from other user
+          const unreadCount = await Message.countDocuments({
+            sender: otherUserId,
+            receiver: userId,
+            read: false
+          });
+
+          return {
+            id: otherUser._id,
+            name: otherUser.name,
+            username: otherUser.username,
+            profilePicture: otherUser.profilePicture,
+            imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
+            lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation about your rental',
+            timestamp: lastMessage ? lastMessage.createdAt : new Date(),
+            unread: unreadCount,
+            online: false,
+            isPinned: false,
+            isMuted: false,
+            isBlocked: false,
+            source: 'marketplace'
+          };
+        } catch (err) {
+          console.error('Error processing marketplace conversation:', err);
+          return null;
+        }
+      })
+    );
+
+    // Process gear inquiry conversations
+    const gearInquiryConversations = await Promise.all(
+      Array.from(gearInquiryUserIds).map(async (otherUserId) => {
+        try {
+          const otherUser = await User.findById(otherUserId).select('name email profilePicture username').lean();
+          
+          if (!otherUser) {
+            return null;
+          }
+
+          // Get last message between these users
+          const lastMessage = await Message.findOne({
+            $or: [
+              { sender: userId, receiver: otherUserId },
+              { sender: otherUserId, receiver: userId }
+            ]
+          }).sort({ createdAt: -1 }).lean();
+
+          // Count unread messages from other user
+          const unreadCount = await Message.countDocuments({
+            sender: otherUserId,
+            receiver: userId,
+            read: false
+          });
+
+          return {
+            id: otherUser._id,
+            name: otherUser.name,
+            username: otherUser.username,
+            profilePicture: otherUser.profilePicture,
+            imageUrl: otherUser.profilePicture || `https://ui-avatars.com/api/?name=${encodeURIComponent(otherUser.name)}&background=random`,
+            lastMessage: lastMessage ? (lastMessage.image ? '📷 Image' : lastMessage.text) : 'Start a conversation about gear',
+            timestamp: lastMessage ? lastMessage.createdAt : new Date(),
+            unread: unreadCount,
+            online: false,
+            isPinned: false,
+            isMuted: false,
+            isBlocked: false,
+            source: 'marketplace'
+          };
+        } catch (err) {
+          console.error('Error processing gear inquiry conversation:', err);
+          return null;
+        }
+      })
+    );
+
+    // Combine matches, connections, marketplace conversations, and gear inquiries
+    const allConversations = [...matchesWithDetails, ...connectionsWithDetails, ...marketplaceConversations, ...gearInquiryConversations];
 
     // Filter out null values and sort by pinned first, then most recent message
     const validMatches = allConversations.filter(m => m !== null);
@@ -179,7 +333,7 @@ exports.getMessages = async (req, res) => {
     const userId = req.userId;
     const { otherUserId } = req.params;
 
-    // Verify match exists OR mutual connection exists
+    // Verify match exists OR mutual connection exists OR rental booking exists
     const [user1, user2] = [userId, otherUserId].sort();
     const match = await Match.findOne({
       user1,
@@ -201,6 +355,37 @@ exports.getMessages = async (req, res) => {
         
         hasPermission = currentUserFollowsOther && otherUserFollowsCurrent;
       }
+    }
+
+    // If still no permission, check for rental booking relationship
+    if (!hasPermission) {
+      const RentalBooking = require('../models/RentalBooking');
+      const rentalBooking = await RentalBooking.findOne({
+        $or: [
+          { renter: userId, owner: otherUserId },
+          { renter: otherUserId, owner: userId }
+        ]
+      });
+      
+      hasPermission = !!rentalBooking;
+    }
+
+    // If still no permission, check if one user owns gear (allows gear inquiries)
+    if (!hasPermission) {
+      const GearRental = require('../models/GearRental');
+      const gearOwned = await GearRental.findOne({
+        $or: [
+          { owner: userId },
+          { owner: otherUserId }
+        ]
+      });
+      
+      hasPermission = !!gearOwned;
+      
+      console.log('Gear inquiry check:', {
+        gearOwnedFound: !!gearOwned,
+        hasPermission
+      });
     }
 
     if (!hasPermission) {
@@ -341,7 +526,7 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    // Verify match exists OR mutual connection exists
+    // Verify match exists OR mutual connection exists OR rental booking exists
     const [user1, user2] = [userId, receiverId].sort();
     const match = await Match.findOne({
       user1,
@@ -378,10 +563,46 @@ exports.sendMessage = async (req, res) => {
       }
     }
 
+    // If still no permission, check for rental booking relationship
+    if (!hasPermission) {
+      const RentalBooking = require('../models/RentalBooking');
+      const rentalBooking = await RentalBooking.findOne({
+        $or: [
+          { renter: userId, owner: receiverId },
+          { renter: receiverId, owner: userId }
+        ]
+      });
+      
+      hasPermission = !!rentalBooking;
+      
+      console.log('Rental booking check:', {
+        rentalBookingFound: !!rentalBooking,
+        hasPermission
+      });
+    }
+
+    // If still no permission, check if one user owns gear (allows gear inquiries)
+    if (!hasPermission) {
+      const GearRental = require('../models/GearRental');
+      const gearOwned = await GearRental.findOne({
+        $or: [
+          { owner: userId },
+          { owner: receiverId }
+        ]
+      });
+      
+      hasPermission = !!gearOwned;
+      
+      console.log('Gear inquiry check:', {
+        gearOwnedFound: !!gearOwned,
+        hasPermission
+      });
+    }
+
     if (!hasPermission) {
       console.log('❌ Message blocked: No permission');
       return res.status(403).json({ 
-        error: 'You can only message users you have matched with. Like each other on the match page first!' 
+        error: 'You can only message users you have matched with or have rental bookings with. Like each other on the match page first!' 
       });
     }
 

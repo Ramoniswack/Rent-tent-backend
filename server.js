@@ -25,6 +25,8 @@ const siteSettingsRoutes = require('./routes/siteSettingsRoutes');
 const adminSiteSettingsRoutes = require('./routes/adminSiteSettingsRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const newsletterRoutes = require('./routes/newsletterRoutes');
+const wishlistRoutes = require('./routes/wishlistRoutes');
+const walletRoutes = require('./routes/walletRoutes');
 
 const app = express();
 
@@ -71,6 +73,8 @@ app.use('/api/site-settings', siteSettingsRoutes);
 app.use('/api/admin/site-settings', adminSiteSettingsRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/newsletter', newsletterRoutes);
+app.use('/api/wishlist', wishlistRoutes);
+app.use('/api/wallet', walletRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
