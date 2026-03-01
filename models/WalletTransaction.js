@@ -63,7 +63,7 @@ const walletTransactionSchema = new mongoose.Schema({
 
 // Index for efficient queries
 walletTransactionSchema.index({ user: 1, createdAt: -1 });
-walletTransactionSchema.index({ 'esewaDetails.transactionUuid': 1 });
+// Note: esewaDetails.transactionUuid already has unique index from schema definition
 walletTransactionSchema.index({ status: 1 });
 
 module.exports = mongoose.model('WalletTransaction', walletTransactionSchema);
