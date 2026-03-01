@@ -29,7 +29,15 @@ Node.js/Express backend for the NomadNotes travel platform with real-time featur
 - **Server**: Running on http://localhost:5000
 - **MongoDB**: Connected successfully
 - **Health Check**: http://localhost:5000/api/health
-- **API Documentation**: http://localhost:5000/api-docs (Swagger)
+- **API Documentation**: http://localhost:5000/api-docs (Swagger UI)
+- **OpenAPI Spec**: http://localhost:5000/api-docs.json
+
+## 📚 Documentation
+
+For comprehensive API documentation, see:
+- **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)** - Complete API guide with examples
+- **[Swagger UI](http://localhost:5000/api-docs)** - Interactive API documentation
+- **[Config README](./config/README.md)** - Configuration details
 
 ## Setup
 

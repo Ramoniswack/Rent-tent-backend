@@ -362,18 +362,18 @@ exports.getAnalytics = async (req, res) => {
     // Calculate total revenue from bookings
     const totalBookingRevenue = completedBookings.reduce((sum, booking) => sum + (booking.totalPrice || 0), 0);
     
-    // Get commission transactions
+    // Get commission transactions (deductions)
     const commissionTransactions = await WalletTransaction.find({ 
-      type: 'debit',
-      'metadata.reason': 'commission'
+      type: 'deduction',
+      description: { $regex: /commission/i }
     });
     
     const commissionRevenue = commissionTransactions.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
     
     // Get wallet recharge transactions
     const rechargeTransactions = await WalletTransaction.find({ 
-      type: 'credit',
-      'metadata.paymentMethod': 'esewa'
+      type: 'recharge',
+      status: 'completed'
     });
     
     const walletRecharges = rechargeTransactions.reduce((sum, tx) => sum + tx.amount, 0);
@@ -405,51 +405,44 @@ exports.getAnalytics = async (req, res) => {
       const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
       
+      // Get completed bookings for the month
       const monthBookings = await RentalBooking.find({
         status: 'completed',
         updatedAt: { $gte: monthStart, $lte: monthEnd }
       });
       
-      const monthRevenue = monthBookings.reduce((sum, booking) => sum + (booking.totalPrice || 0), 0);
+      const bookingRevenue = monthBookings.reduce((sum, booking) => sum + (booking.totalPrice || 0), 0);
+      
+      // Get wallet recharges for the month
+      const monthRecharges = await WalletTransaction.find({
+        type: 'recharge',
+        status: 'completed',
+        createdAt: { $gte: monthStart, $lte: monthEnd }
+      });
+      
+      const rechargeRevenue = monthRecharges.reduce((sum, tx) => sum + tx.amount, 0);
+      
+      // Total revenue for the month
+      const totalMonthRevenue = bookingRevenue + rechargeRevenue;
       
       monthlyRevenue.push({
         month: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-        revenue: monthRevenue
+        revenue: totalMonthRevenue
       });
     }
     
     // Get all transactions (commissions and recharges)
-    const allCommissions = await WalletTransaction.find({ 
-      type: 'debit',
-      'metadata.reason': 'commission'
-    })
-      .populate('userId', 'name')
+    const allTransactions = await WalletTransaction.find()
+      .populate('user', 'name email')
       .sort({ createdAt: -1 });
     
-    const allRecharges = await WalletTransaction.find({ 
-      type: 'credit',
-      'metadata.paymentMethod': 'esewa'
-    })
-      .populate('userId', 'name')
-      .sort({ createdAt: -1 });
-    
-    const recentTransactions = [
-      ...allCommissions.map(tx => ({
-        date: tx.createdAt,
-        type: 'commission',
-        userName: tx.userId?.name,
-        amount: Math.abs(tx.amount),
-        description: tx.metadata?.description || 'Commission deduction'
-      })),
-      ...allRecharges.map(tx => ({
-        date: tx.createdAt,
-        type: 'recharge',
-        userName: tx.userId?.name,
-        amount: tx.amount,
-        description: 'Wallet recharge via eSewa'
-      }))
-    ]
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const recentTransactions = allTransactions.map(tx => ({
+      date: tx.createdAt,
+      type: tx.type,
+      userName: tx.user?.name,
+      amount: tx.amount,
+      description: tx.description || '-'
+    }));
     
     res.json({
       totalRevenue,

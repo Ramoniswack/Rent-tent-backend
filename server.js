@@ -35,8 +35,23 @@ app.use(express.json());
 
 // Swagger Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'NomadNotes API Documentation'
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info { margin: 50px 0; }
+    .swagger-ui .info .title { font-size: 36px; }
+    .swagger-ui .scheme-container { background: #1f2937; padding: 20px; border-radius: 8px; }
+  `,
+  customSiteTitle: 'NomadNotes API Documentation',
+  customfavIcon: '/favicon.ico',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true,
+    syntaxHighlight: {
+      activate: true,
+      theme: 'monokai'
+    }
+  }
 }));
 
 // Swagger JSON endpoint
