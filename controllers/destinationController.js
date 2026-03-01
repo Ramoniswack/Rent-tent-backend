@@ -58,7 +58,7 @@ exports.getDestinations = async (req, res) => {
 exports.createDestination = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, activity, time, status } = req.body;
+    const { name, activity, time, status, lat, lng } = req.body;
 
     // Verify edit permission (owner or editor)
     const trip = await canEdit(id, req.userId);
@@ -72,7 +72,9 @@ exports.createDestination = async (req, res) => {
       time,
       tripId: id,
       createdBy: req.userId,
-      status: status || 'planning' // Default to planning if not provided
+      status: status || 'planning', // Default to planning if not provided
+      lat: lat,
+      lng: lng
     });
 
     await destination.save();
@@ -113,7 +115,7 @@ exports.deleteDestination = async (req, res) => {
 exports.updateDestination = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, name, activity, time } = req.body;
+    const { status, name, activity, time, lat, lng } = req.body;
 
     // Validate status if provided
     if (status && !['planning', 'traveling', 'completed'].includes(status)) {
@@ -136,6 +138,8 @@ exports.updateDestination = async (req, res) => {
     if (name) destination.name = name;
     if (activity) destination.activity = activity;
     if (time) destination.time = time;
+    if (lat !== undefined) destination.lat = lat;
+    if (lng !== undefined) destination.lng = lng;
     
     await destination.save();
     

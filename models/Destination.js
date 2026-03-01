@@ -28,6 +28,12 @@ const destinationSchema = new mongoose.Schema({
     type: String,
     enum: ['planning', 'traveling', 'completed'],
     default: 'planning'
+  },
+  lat: {
+    type: Number
+  },
+  lng: {
+    type: Number
   }
 }, {
   timestamps: true
