@@ -58,7 +58,7 @@ exports.getDestinations = async (req, res) => {
 exports.createDestination = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, activity, time, status, lat, lng } = req.body;
+    const { name, title, activity, time, status, lat, lng } = req.body;
 
     // Verify edit permission (owner or editor)
     const trip = await canEdit(id, req.userId);
@@ -68,7 +68,8 @@ exports.createDestination = async (req, res) => {
 
     const destination = new Destination({
       name,
-      activity,
+      title,
+      activity: activity || '', // Default to empty string if not provided
       time,
       tripId: id,
       createdBy: req.userId,
@@ -115,7 +116,7 @@ exports.deleteDestination = async (req, res) => {
 exports.updateDestination = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, name, activity, time, lat, lng } = req.body;
+    const { status, name, title, activity, time, lat, lng } = req.body;
 
     // Validate status if provided
     if (status && !['planning', 'traveling', 'completed'].includes(status)) {
@@ -136,7 +137,8 @@ exports.updateDestination = async (req, res) => {
     // Update fields
     if (status) destination.status = status;
     if (name) destination.name = name;
-    if (activity) destination.activity = activity;
+    if (title !== undefined) destination.title = title;
+    if (activity !== undefined) destination.activity = activity;
     if (time) destination.time = time;
     if (lat !== undefined) destination.lat = lat;
     if (lng !== undefined) destination.lng = lng;

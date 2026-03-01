@@ -6,9 +6,12 @@ const destinationSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  title: {
+    type: String,
+    trim: true
+  },
   activity: {
     type: String,
-    required: true,
     trim: true
   },
   time: {
